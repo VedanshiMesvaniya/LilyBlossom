@@ -1,8 +1,5 @@
 # Node
 node_modules/
-.next/
-out/
-build/
 dist/
 
 # Env
@@ -32,4 +29,3 @@ Thumbs.db
 # Test / coverage
 coverage/
 .pytest_cache/
-tsconfig.tsbuildinfo

@@ -1,7 +1,9 @@
 # Crawler
 
 The crawler is a separate Python worker under `crawler/`. It is never
-run inside the browser and never runs as part of a Next.js request.
+run inside the browser. `crawler/main.py` holds the pipeline itself;
+`crawler/worker.py` is the small HTTP backend that triggers it, see
+ARCHITECTURE.md for how the two fit together.
 
 ## Pipeline
 
@@ -83,10 +85,10 @@ production.
 ## Scheduling
 
 Supabase Cron calls `supabase/functions/crawler-trigger` daily, which
-calls the secured `app/api/admin/crawler/run` route with the shared
-`CRAWLER_SECRET`. See `docs/SUPABASE_CRON.sql` for the exact schedule,
-and `docs/DEPLOYMENT.md` for where the Python worker itself needs to
-run so that route has something to notify.
+calls the Python backend's `/run` endpoint (`crawler/worker.py`)
+directly with the shared `CRAWLER_SECRET`. See
+`docs/SUPABASE_CRON.sql` for the exact schedule, and
+`docs/DEPLOYMENT.md` for where that backend needs to run.
 
 ## Never hard code the current year
 
