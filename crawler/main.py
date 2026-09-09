@@ -132,7 +132,7 @@ def run_crawl(dry_run: bool) -> CrawlRunSummary:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="GL Tracker daily catalog crawler.")
+    parser = argparse.ArgumentParser(description="LilyBlossom daily catalog crawler.")
     parser.add_argument("--dry-run", action="store_true", help="Crawl and report only, never write to the database.")
     args = parser.parse_args()
 

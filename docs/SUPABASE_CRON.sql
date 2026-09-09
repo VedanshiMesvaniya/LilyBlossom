@@ -3,7 +3,7 @@
 -- on Supabase projects.
 
 select cron.schedule(
-  'gl-tracker-daily-crawl',
+  'lilyblossom-daily-crawl',
   '0 3 * * *', -- 03:00 UTC daily
   $$
   select net.http_post(

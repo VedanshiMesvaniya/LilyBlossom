@@ -4,10 +4,15 @@
 
 There is no signup flow for admin accounts. An existing admin, or a
 database owner, sets `profiles.role = 'admin'` directly, see
-`docs/SETUP.md` step 5. `/admin` and every `/admin/*` page and API
-route calls `requireAdmin()`, which checks this column server side. A
-non admin who navigates to `/admin` gets an error, not a hidden page
-that merely looks empty.
+`docs/SETUP.md` step 6. `/admin` and every `/admin/*` page is wrapped
+in the `RequireAdmin` component (`src/components/ProtectedRoute.jsx`),
+which checks this column. A non admin who navigates to `/admin` gets
+an explicit message, not a hidden page that merely looks empty. The
+two admin actions that write an audit log entry (editing a title,
+changing an announcement's status) go through the Python backend
+(`crawler/worker.py`), which independently checks the same column
+before doing anything, since a page-level check alone is never the
+real boundary, see "What admins cannot bypass" below.
 
 ## Daily flow
 
@@ -46,13 +51,14 @@ Published titles become visible to everyone
 
 Every publish, unpublish, edit, merge, delete, approve, reject, and
 crawler run performed by an admin is written to `admin_actions` with
-the admin's id, the old value, and the new value. The API routes in
-`app/api/admin/*` write this row automatically; a new admin action
+the admin's id, the old value, and the new value. The endpoints in
+`crawler/worker.py` write this row automatically; a new admin action
 should follow the same pattern rather than skip logging.
 
 ## What admins cannot bypass
 
 Row Level Security in `supabase/migrations/009_rls.sql` is the real
-boundary, not the `requireAdmin()` check in the route handlers. Even
-if a route handler had a bug, RLS still blocks a non admin from
-writing to `titles`, `sources`, or `announcements` directly.
+boundary, not the admin checks in `RequireAdmin` or
+`crawler/worker.py`. Even if one of those checks had a bug, RLS still
+blocks a non admin from writing to `titles`, `sources`, or
+`announcements` directly.

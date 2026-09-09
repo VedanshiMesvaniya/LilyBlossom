@@ -1,10 +1,10 @@
-# GL Tracker
+# LilyBlossom
 
-GL Tracker is a dedicated media catalog and personal watch tracker for
-Girls' Love (GL / yuri / sapphic) movies and series. It is built for
-real, multi-user use: real authentication, a real centralized catalog,
-a daily automated crawler, an admin review workflow, and personal
-tracking per user.
+LilyBlossom is a dedicated media catalog and personal watch tracker
+for Girls' Love (GL / yuri / sapphic) movies and series. It is built
+for real, multi-user use: real authentication, a real centralized
+catalog, a daily automated crawler, an admin review workflow, and
+personal tracking per user.
 
 This is not a demo. There is no local storage catalog, no browser side
 scraping, and no user submitted catalog entries. The catalog is only
@@ -31,22 +31,25 @@ ever written by the crawler pipeline or an admin.
 
 | Layer | Choice |
 | --- | --- |
-| Frontend | Next.js (App Router), TypeScript, Tailwind CSS |
+| Frontend | React (plain JavaScript, no TypeScript), Vite, react-router-dom, Tailwind CSS |
+| Backend | A small Python HTTP service for admin actions and the crawler trigger only |
 | Auth, database, storage | Supabase (Auth, PostgreSQL, Storage, Row Level Security, Cron) |
 | Crawler | Python, httpx, BeautifulSoup, Playwright (for JS rendered pages), Pydantic, rapidfuzz |
-| Scheduling | Supabase Cron (pg_cron) calling a Supabase Edge Function, which triggers the crawler worker |
+| Scheduling | Supabase Cron (pg_cron) calling a Supabase Edge Function, which calls the backend |
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full picture of how
-these pieces fit together and why the crawler is a separate Python
-worker instead of code inside the frontend.
+Almost everything talks to Supabase directly from the browser and
+relies on Row Level Security, there is no framework server in between
+anymore. The Python backend exists only for the handful of actions
+that need a secret key. See [ARCHITECTURE.md](./ARCHITECTURE.md) for
+the full picture.
 
 ## Project status
 
 This repository currently holds a complete, working scaffold of the
 architecture described above:
 
-- All pages and API routes described in the product spec exist and
-  are wired to Supabase queries that respect Row Level Security.
+- All pages exist and talk to Supabase directly, respecting Row Level
+  Security.
 - All database tables and RLS policies are written as SQL migrations
   and are ready to run against a Supabase project.
 - The crawler pipeline (fetch, parse, normalize, validate, deduplicate,
@@ -68,17 +71,14 @@ See [docs/SETUP.md](./docs/SETUP.md) for full setup steps. Short version:
 
 ```bash
 npm install
-cp .env.example .env.local   # fill in your Supabase project values
+pip install -r crawler/requirements.txt
+cp .env.example .env   # fill in your Supabase project values
 npm run dev
 ```
 
-For the crawler:
-
-```bash
-cd crawler
-pip install -r requirements.txt
-python -m crawler.main --dry-run
-```
+`npm run dev` starts the whole app, the React frontend and the small
+Python backend, with one command. There is nothing else to run
+separately for local development.
 
 ## Documentation
 
@@ -91,18 +91,18 @@ python -m crawler.main --dry-run
 - [docs/CRAWLER.md](./docs/CRAWLER.md): how the daily crawler works,
   how to add a new source, and what still needs verification.
 - [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md): deploying the frontend,
-  database, and crawler worker.
+  database, and backend.
 - [docs/ADMIN.md](./docs/ADMIN.md): the admin review and moderation
   workflow.
 
 ## Support
 
-support@gltracker.app
+support@lilyblossom.app
 
 ## Copyright
 
-Copyright the current year, Vedu, GL Tracker.
+Copyright the current year, Vedu, LilyBlossom.
 
-Original GL Tracker UI, software and tracking experience. Third party
+Original LilyBlossom UI, software and tracking experience. Third party
 titles, trademarks, posters, logos and source material remain the
 property of their respective rights holders.

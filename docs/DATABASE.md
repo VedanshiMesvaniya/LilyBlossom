@@ -29,10 +29,11 @@ write personal state into the `titles` row, or read the global
 | `poster_assets` | The crawler's poster handler, after hashing to avoid duplicate storage |
 
 This is enforced twice: once in `009_rls.sql` at the database level,
-and once in the API route handlers, which check `requireAdmin()` before
-doing anything privileged. The RLS policies are the real boundary. The
-route level checks exist so a mistake fails fast during development
-instead of only being caught by RLS in production.
+and once in the frontend's `RequireAdmin` component and the small
+Python backend (`crawler/worker.py`), which both check the caller's
+`profiles.role` before doing anything privileged. The RLS policies are
+the real boundary. The app-level checks exist so a mistake fails fast
+during development instead of only being caught by RLS in production.
 
 ## Key tables
 
@@ -57,8 +58,10 @@ instead of only being caught by RLS in production.
 ## Full text search
 
 `008_indexes.sql` adds a generated `search_vector` column on `titles`
-and a GIN index on it. `/api/search` uses `textSearch` against that
-column. If you add a field that should be searchable (an alias table,
+and a GIN index on it. Any client-side query can filter on it with
+Supabase's `.textSearch("search_vector", q, { type: "websearch" })`,
+the same way `src/lib/catalogQueries.js` builds its other catalog
+queries. If you add a field that should be searchable (an alias table,
 for example), extend the generated column expression there rather than
 adding a second search path.
 
