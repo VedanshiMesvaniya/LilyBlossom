@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "description": "LilyBlossom: a dedicated Girls' Love (GL/yuri) media catalog and personal watch tracker.",
+  "author": "Vedanshi Mesvaniya <vedanshimesvaniya@gmail.com>",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "concurrently -n web,api -c blue,magenta \"vite\" \"python3 crawler/worker.py\"",

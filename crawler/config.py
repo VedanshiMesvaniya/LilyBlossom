@@ -33,4 +33,4 @@ DUPLICATE_CONFIDENCE_THRESHOLD = 0.95   # >= this: treat as the same title
 REVIEW_CONFIDENCE_THRESHOLD = 0.80      # 0.80-0.95: needs admin review
 # below REVIEW_CONFIDENCE_THRESHOLD: treated as a different title
 
-USER_AGENT = "LilyBlossomCrawler/1.0 (+mailto:support@lilyblossom.app)"
+USER_AGENT = "LilyBlossomCrawler/1.0 (+mailto:vedanshimesvaniya@gmail.com)"

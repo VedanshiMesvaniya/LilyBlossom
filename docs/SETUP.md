@@ -54,7 +54,7 @@ backend, see the comments inside it. Fill in:
 - `VITE_API_URL` and `CRAWLER_WORKER_PORT` (defaults already fill in
   `http://localhost:8787` and `8787`, only change these if that port
   is taken).
-- `VITE_SUPPORT_EMAIL` (defaults to support@lilyblossom.app).
+- `VITE_SUPPORT_EMAIL` (defaults to vedanshimesvaniya@gmail.com).
 
 ## 4. Install dependencies
 
