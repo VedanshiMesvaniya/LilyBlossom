@@ -25,13 +25,11 @@ returns boolean as $$
   );
 $$ language sql security definer stable;
 
--- Profiles: public username/avatar read, owner-only write.
+-- Profiles: public username/avatar read, owner-only update.
 create policy "profiles are publicly readable" on profiles
   for select using (true);
 create policy "users update their own profile" on profiles
   for update using (auth.uid() = id);
-create policy "users insert their own profile" on profiles
-  for insert with check (auth.uid() = id);
 
 -- Titles: public read of published rows only; admin manages everything.
 create policy "published titles are publicly readable" on titles
