@@ -3,8 +3,8 @@
 // used outside Tailwind (meta tags, favicon, emails) stay in sync.
 
 export const PRODUCT_NAME = "LilyBlossom";
-export const PRODUCT_OWNER = "Vedu";
-export const SUPPORT_EMAIL = import.meta.env.VITE_SUPPORT_EMAIL || "support@lilyblossom.app";
+export const PRODUCT_OWNER = "Vedanshi Mesvaniya";
+export const SUPPORT_EMAIL = import.meta.env.VITE_SUPPORT_EMAIL || "vedanshimesvaniya@gmail.com";
 
 export const CURRENT_YEAR = new Date().getFullYear();
 

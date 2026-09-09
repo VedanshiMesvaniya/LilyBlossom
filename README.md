@@ -94,15 +94,21 @@ separately for local development.
   database, and backend.
 - [docs/ADMIN.md](./docs/ADMIN.md): the admin review and moderation
   workflow.
+- [LICENSE](./LICENSE): the MIT license covering this project's own
+  code.
+- [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md): every third-party
+  resource this project uses and the conditions attached to it.
 
 ## Support
 
-support@lilyblossom.app
+vedanshimesvaniya@gmail.com
 
-## Copyright
+## License
 
-Copyright the current year, Vedu, LilyBlossom.
-
-Original LilyBlossom UI, software and tracking experience. Third party
-titles, trademarks, posters, logos and source material remain the
-property of their respective rights holders.
+This project's own code is MIT licensed, copyright Vedanshi Mesvaniya,
+see [LICENSE](./LICENSE). This project also uses third-party resources
+such as open source packages, fonts, the TMDB API, and titles,
+descriptions, posters and other metadata sourced from third-party GL
+catalog sites. Those stay under their own licenses and terms, see
+[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the full list
+and conditions.
