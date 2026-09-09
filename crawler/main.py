@@ -23,17 +23,15 @@ from .models import CrawlRunSummary, RawCrawlItem
 from .normalizer import normalize_title, slugify
 from .sources.base import SourceAdapter
 from .sources.gl_archive import GLArchiveAdapter
-from .sources.gl_central import GLCentralAdapter
-from .sources.glthai import GLThaiAdapter
-from .sources.shipsbloom import ShipsBloomAdapter
+from .sources.anilist import AniListAdapter
+from .sources.tmdb import TMDBAdapter
 
 # Registering a new source is the only thing needed here; main() itself
 # never needs to change to add another adapter.
 SOURCE_REGISTRY: list[type[SourceAdapter]] = [
     GLArchiveAdapter,
-    GLCentralAdapter,
-    GLThaiAdapter,
-    ShipsBloomAdapter,
+    AniListAdapter,
+    TMDBAdapter,
 ]
 
 
