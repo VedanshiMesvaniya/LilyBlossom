@@ -7,50 +7,63 @@ This is a guide for doing it, not a record that it happened.
 
 | Piece | Where |
 | --- | --- |
-| Frontend (Next.js) | Vercel, or any Next.js compatible host |
+| Frontend (React, static build) | Vercel, Netlify, Cloudflare Pages, or any static host |
 | Auth, database, storage | Supabase (already required for local dev, same project) |
-| Crawler worker | A container on Render, Railway, or Fly.io, a small VM, or a scheduled GitHub Action if the runtime limit is acceptable |
+| Backend (admin actions + crawler trigger) | A container on Render, Railway, or Fly.io, or a small VM |
 | Scheduling | Supabase Cron, calling a Supabase Edge Function |
 
 ## Frontend
 
+The frontend is a plain static site once built, `npm run build` writes
+static HTML, CSS, and JS to `dist/`. There is no server-side rendering
+step to run.
+
 1. Push this repository to your own remote if you have not already.
-2. Import the project into Vercel (or your chosen host).
-3. Set the environment variables from `.env.example` in the host's
-   dashboard: `NEXT_PUBLIC_SUPABASE_URL`,
-   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`,
-   `TMDB_API_KEY`, `CRAWLER_SECRET`, `SUPPORT_EMAIL`. Do not set
-   `SUPABASE_SERVICE_ROLE_KEY` as a `NEXT_PUBLIC_*` variable; it must
-   stay server only.
-4. Deploy. `npm run build` runs as part of the standard Next.js build
-   step.
+2. Import the project into Vercel, Netlify, or your chosen static
+   host, with `npm run build` as the build command and `dist` as the
+   output directory.
+3. Set the environment variables from `.env.example` that start with
+   `VITE_` in the host's dashboard: `VITE_SUPABASE_URL`,
+   `VITE_SUPABASE_PUBLISHABLE_KEY`, `VITE_API_URL` (point this at your
+   deployed backend's URL), and `VITE_SUPPORT_EMAIL`. Do not set
+   `SUPABASE_SERVICE_ROLE_KEY` here, it must never reach a `VITE_*`
+   variable or the browser bundle.
+4. Since this is a single-page app using client-side routing
+   (react-router-dom), configure the host to serve `index.html` for
+   every path that is not a real static file (a SPA rewrite rule).
+   Vercel and Netlify both support this out of the box for a Vite
+   build; check your host's docs if you use something else.
 
-## Crawler worker
+## Backend
 
-The crawler is plain Python, not a serverless function, because
-Playwright and multi source crawling do not fit comfortably inside a
-short lived function.
+The backend (`crawler/worker.py`) doubles as the crawler runner, so it
+is plain Python, not a serverless function, since multi-source
+crawling, retries, and (if a future adapter needs it) Playwright do
+not fit comfortably inside a short lived function.
 
-1. Build a container from `crawler/` with `crawler/requirements.txt`
-   installed, plus `playwright install --with-deps` if any adapter
-   uses Playwright.
-2. Expose a small HTTP endpoint (not included yet) that accepts a
-   POST request authenticated with `CRAWLER_SECRET`, and runs
-   `crawler.main.run_crawl(dry_run=False)` when called. This is the
-   endpoint `app/api/admin/crawler/run` should notify.
+1. Build a container from the repository root with
+   `crawler/requirements.txt` installed, plus
+   `playwright install --with-deps` only if a future adapter adds
+   Playwright as a dependency. No current adapter uses it.
+2. Run it with `python -m crawler.worker`. It listens on
+   `CRAWLER_WORKER_PORT` (default `8787`) and exposes `/health`,
+   `/run`, `/titles`, and `/announcements`, see `crawler/worker.py`'s
+   module docstring for what each does.
 3. Deploy that container to Render, Railway, Fly.io, or a VM you
-   control, with `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
-   and `TMDB_API_KEY` set as environment variables there.
+   control, with `VITE_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+   `CRAWLER_SECRET`, and `TMDB_API_KEY` set as environment variables
+   there. Also set `FRONTEND_ORIGIN` to your deployed frontend's exact
+   URL, the default of `*` is only meant for local development.
 4. Confirm `python -m crawler.main --dry-run` succeeds against that
    deployment's environment before wiring the scheduler to it.
 
 ## Scheduling
 
 1. `supabase functions deploy crawler-trigger` from a machine with the
-   Supabase CLI logged in, after setting `APP_URL` and `CRAWLER_SECRET`
-   as function secrets:
+   Supabase CLI logged in, after setting `BACKEND_URL` and
+   `CRAWLER_SECRET` as function secrets:
    ```bash
-   supabase secrets set APP_URL=https://your-deployed-app.example CRAWLER_SECRET=your-shared-secret
+   supabase secrets set BACKEND_URL=https://your-deployed-backend.example CRAWLER_SECRET=your-shared-secret
    ```
 2. Run `docs/SUPABASE_CRON.sql` in the Supabase SQL editor, replacing
    `<project-ref>` with your project's reference.
@@ -61,11 +74,10 @@ short lived function.
 
 ## Definition of done before calling this live
 
-- `npm run lint`, `npm run typecheck`, `npm run build`, and `npm test`
-  all succeed.
+- `npm run lint`, `npm run build`, and `npm test` all succeed.
 - `python -m pytest tests/crawler` succeeds.
 - `python -m crawler.main --dry-run` succeeds against the deployed
-  worker's environment and the printed report looks correct for at
+  backend's environment and the printed report looks correct for at
   least one real source, with selectors verified per
   `docs/CRAWLER.md`.
 - An admin account exists and `/admin` is reachable only by it.

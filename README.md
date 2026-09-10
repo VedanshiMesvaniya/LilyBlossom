@@ -1,10 +1,10 @@
-# GL Tracker
+# LilyBlossom
 
-GL Tracker is a dedicated media catalog and personal watch tracker for
-Girls' Love (GL / yuri / sapphic) movies and series. It is built for
-real, multi-user use: real authentication, a real centralized catalog,
-a daily automated crawler, an admin review workflow, and personal
-tracking per user.
+LilyBlossom is a dedicated media catalog and personal watch tracker
+for Girls' Love (GL / yuri / sapphic) movies and series. It is built
+for real, multi-user use: real authentication, a real centralized
+catalog, a daily automated crawler, an admin review workflow, and
+personal tracking per user.
 
 This is not a demo. There is no local storage catalog, no browser side
 scraping, and no user submitted catalog entries. The catalog is only
@@ -31,33 +31,40 @@ ever written by the crawler pipeline or an admin.
 
 | Layer | Choice |
 | --- | --- |
-| Frontend | Next.js (App Router), TypeScript, Tailwind CSS |
+| Frontend | React (plain JavaScript, no TypeScript), Vite, react-router-dom, Tailwind CSS |
+| Backend | A small Python HTTP service for admin actions and the crawler trigger only |
 | Auth, database, storage | Supabase (Auth, PostgreSQL, Storage, Row Level Security, Cron) |
-| Crawler | Python, httpx, BeautifulSoup, Playwright (for JS rendered pages), Pydantic, rapidfuzz |
-| Scheduling | Supabase Cron (pg_cron) calling a Supabase Edge Function, which triggers the crawler worker |
+| Crawler | Python, httpx, BeautifulSoup, Pydantic, rapidfuzz |
+| Scheduling | Supabase Cron (pg_cron) calling a Supabase Edge Function, which calls the backend |
 
-See [ARCHITECTURE.md](./ARCHITECTURE.md) for the full picture of how
-these pieces fit together and why the crawler is a separate Python
-worker instead of code inside the frontend.
+Almost everything talks to Supabase directly from the browser and
+relies on Row Level Security, there is no framework server in between
+anymore. The Python backend exists only for the handful of actions
+that need a secret key. See [ARCHITECTURE.md](./ARCHITECTURE.md) for
+the full picture.
 
 ## Project status
 
 This repository currently holds a complete, working scaffold of the
 architecture described above:
 
-- All pages and API routes described in the product spec exist and
-  are wired to Supabase queries that respect Row Level Security.
+- All pages exist and talk to Supabase directly, respecting Row Level
+  Security.
 - All database tables and RLS policies are written as SQL migrations
   and are ready to run against a Supabase project.
 - The crawler pipeline (fetch, parse, normalize, validate, deduplicate,
   change detect) is implemented and unit tested against realistic
   sample data.
-- The specific CSS selectors inside each site adapter
-  (`crawler/sources/*.py`) are a best effort starting point. They have
-  not been verified against the live GL Archive, GL Central, GLThai or
-  ShipsBloom pages, because this build environment cannot reach those
-  domains. Read `docs/CRAWLER.md` before running the crawler for real,
-  and expect to adjust selectors against the actual site markup.
+- The crawler's three sources are GL Archive, AniList, and TMDB:
+  - GL Archive (`crawler/sources/gl_archive.py`) scrapes the live
+    catalog page directly. Its CSS selectors were checked against
+    that site's real markup.
+  - AniList and TMDB (`crawler/sources/anilist.py`,
+    `crawler/sources/tmdb.py`) use official, documented JSON APIs, not
+    scraping, so there is no markup to keep in sync. AniList can
+    return a temporary error or get rate limited; the crawler treats
+    that as one source being unavailable for that run rather than a
+    reason to fail the whole crawl, see `docs/CRAWLER.md`.
 - No Supabase project, TMDB key, or hosting has been provisioned yet.
   Nothing has been deployed. `docs/SETUP.md` walks through provisioning
   everything from scratch.
@@ -68,17 +75,14 @@ See [docs/SETUP.md](./docs/SETUP.md) for full setup steps. Short version:
 
 ```bash
 npm install
-cp .env.example .env.local   # fill in your Supabase project values
+pip install -r crawler/requirements.txt
+cp .env.example .env   # fill in your Supabase project values
 npm run dev
 ```
 
-For the crawler:
-
-```bash
-cd crawler
-pip install -r requirements.txt
-python -m crawler.main --dry-run
-```
+`npm run dev` starts the whole app, the React frontend and the small
+Python backend, with one command. There is nothing else to run
+separately for local development.
 
 ## Documentation
 
@@ -91,18 +95,24 @@ python -m crawler.main --dry-run
 - [docs/CRAWLER.md](./docs/CRAWLER.md): how the daily crawler works,
   how to add a new source, and what still needs verification.
 - [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md): deploying the frontend,
-  database, and crawler worker.
+  database, and backend.
 - [docs/ADMIN.md](./docs/ADMIN.md): the admin review and moderation
   workflow.
+- [LICENSE](./LICENSE): the MIT license covering this project's own
+  code.
+- [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md): every third-party
+  resource this project uses and the conditions attached to it.
 
 ## Support
 
-support@gltracker.app
+vedanshimesvaniya@gmail.com
 
-## Copyright
+## License
 
-Copyright the current year, Vedu, GL Tracker.
-
-Original GL Tracker UI, software and tracking experience. Third party
-titles, trademarks, posters, logos and source material remain the
-property of their respective rights holders.
+This project's own code is MIT licensed, copyright Vedanshi Mesvaniya,
+see [LICENSE](./LICENSE). This project also uses third-party resources
+such as open source packages, fonts, the TMDB API, and titles,
+descriptions, posters and other metadata sourced from third-party GL
+catalog sites. Those stay under their own licenses and terms, see
+[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for the full list
+and conditions.

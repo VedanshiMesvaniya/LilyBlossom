@@ -4,64 +4,88 @@
 
 The previous prototype kept everything, including the catalog, in the
 browser. That does not survive multiple users, a daily crawler, or an
-admin review workflow, so this version splits the system into three
-independent pieces that only talk to each other through the database
-or a defined API:
+admin review workflow. This version splits the system into pieces that
+only talk to each other through the database or a small, narrow API:
 
 ```
-                    GL TRACKER
-                         |
-                Next.js (App Router)
-                         |
-                    Supabase
-          -------------------------------
-          |              |              |
-       Auth           PostgreSQL      Storage
-          |              |              |
-     email/password   GL catalog      posters
-          |              |
-          |         user tracking
-          |              |
-          -------------------------------
-                         |
-                  Python Crawler
-                         |
-                Daily scheduled job
-                         |
-        -------------------------------
-        |                |                |
-     GL Archive        GLThai         ShipsBloom
-     GL Central
-        |                |                |
-        -------------------------------
-                         |
-                 normalize + dedupe
-                         |
-                  change detection
-                         |
-                  admin review queue
-                         |
-                     publish
-                         |
-                  GL Tracker users
+                     LILYBLOSSOM
+                          |
+              React (Vite, plain JavaScript)
+                          |
+                     Supabase
+           -------------------------------
+           |              |              |
+        Auth           PostgreSQL      Storage
+           |              |              |
+      email/password   GL catalog      posters
+           |              |
+           |         user tracking
+           |              |
+           -------------------------------
+                          |
+                Python backend (admin + crawler trigger only)
+                          |
+                  Python Crawler pipeline
+                          |
+                 Daily scheduled job
+                          |
+         -------------------------------
+         |                |                |
+      GL Archive        AniList          TMDB
+         |                |                |
+         -------------------------------
+                          |
+                  normalize + dedupe
+                          |
+                   change detection
+                          |
+                   admin review queue
+                          |
+                      publish
+                          |
+                LilyBlossom users
 ```
 
-## Why the crawler is not inside Next.js or a Supabase Edge Function
+Almost everything in that diagram is just "React talks to Supabase
+directly." Browsing the catalog, signing in, and personal tracking
+never touch a server of ours at all, they rely on Supabase's Row Level
+Security (see `supabase/migrations/009_rls.sql`) as the real access
+boundary. The one small Python backend (`crawler/worker.py`) exists
+only for the handful of actions that need the service-role key, which
+must never reach the browser: triggering a crawl, and the two admin
+edit actions that write an audit log entry.
 
-The crawler needs a full Python environment with Playwright for
-JavaScript rendered pages, retry and backoff logic, and enough runtime
-to crawl several sources without hitting a serverless function's time
-limit. Supabase Edge Functions and Vercel functions are both a poor
-fit for that. Supabase is used for what it is strong at: auth,
-PostgreSQL, storage, Row Level Security, and scheduling.
+## One command starts everything
+
+`npm run dev` uses `concurrently` to start the Vite dev server and the
+Python backend side by side. There is no separate step to remember and
+no second terminal to keep open for local development. See
+`package.json` and `docs/SETUP.md`.
+
+## Why the crawler is not inside the frontend or a Supabase Edge Function
+
+The crawler needs a full Python environment, with room to add
+Playwright later if a future source needs JavaScript rendering, plus
+retry and backoff logic, and enough runtime to crawl several sources
+without hitting a serverless function's time limit. Supabase Edge
+Functions are a poor fit for that. Supabase is used for what it is
+strong at: auth, PostgreSQL, storage, Row Level Security, and
+scheduling.
 
 The crawler runs as its own service (see `crawler/`) and is triggered
 on a schedule by Supabase Cron through a small Edge Function
-(`supabase/functions/crawler-trigger`), which calls a secured route in
-the Next.js app (`app/api/admin/crawler/run`), which in turn is
-expected to notify the deployed Python worker. See
-[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) for where that worker
-actually runs.
+(`supabase/functions/crawler-trigger`), which calls the Python
+backend's `/run` endpoint directly with a shared secret. See
+[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md) for where that backend
+actually runs in production.
+
+## Why a small Python backend instead of a Node one
+
+The crawler pipeline was already Python. Rather than run a second
+runtime just to hold a few admin endpoints, `crawler/worker.py` uses
+Python's standard library HTTP server to expose the same three
+endpoints a Node service would have needed. One runtime, one process,
+one thing to deploy alongside the crawler.
 
 ## Data flow for a new title
 
@@ -83,10 +107,12 @@ actually runs.
 
 A signed in user's watch status is stored in `user_media_status`, keyed
 by `(user_id, title_id)`, and is never written to the shared `titles`
-row. The API route `app/api/me/list/[titleId]/route.ts` is the only
-write path for this table, and Row Level Security additionally
-restricts every row to its own owner, so even a bug in that route
-cannot expose or modify another user's tracking data.
+row. `src/components/TrackingControls.jsx` writes to this table
+directly from the browser using the signed-in user's own Supabase
+session. Row Level Security restricts every row to its own owner (see
+`supabase/migrations/009_rls.sql`), so this is safe without a backend
+in the middle, even a bug in the frontend cannot expose or modify
+another user's tracking data.
 
 ## What can change without breaking this shape
 
@@ -94,15 +120,15 @@ cannot expose or modify another user's tracking data.
   `crawler/sources/` and registering it in `crawler/main.py`'s
   `SOURCE_REGISTRY`. Nothing else in the pipeline needs to change.
 - Adding a new catalog filter or sort option is a change to
-  `lib/catalog/queries.ts` and the relevant page, not to the schema.
-- Swapping the crawler's hosting target (Render, Railway, Fly.io, a
-  VM, or a scheduled GitHub Action) only changes
-  `docs/DEPLOYMENT.md` and the URL the Edge Function calls. The
-  crawler code itself does not depend on where it runs.
+  `src/lib/catalogQueries.js` and the relevant page, not to the schema.
+- Swapping the backend's hosting target (Render, Railway, Fly.io, a
+  VM) only changes `docs/DEPLOYMENT.md` and the URL the Edge Function
+  and the frontend's `VITE_API_URL` point at. The backend code itself
+  does not depend on where it runs.
 
 ## Update this file when architecture changes
 
-If a future change adds, removes, or reroutes one of the three main
-pieces (frontend, Supabase, crawler) or changes how they talk to each
-other, this file and the diagram above should be updated in the same
-change, not left to go stale.
+If a future change adds, removes, or reroutes one of the main pieces
+(frontend, Supabase, backend, crawler) or changes how they talk to
+each other, this file and the diagram above should be updated in the
+same change, not left to go stale.

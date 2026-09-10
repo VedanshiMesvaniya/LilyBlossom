@@ -24,7 +24,7 @@ class SourceAdapter(ABC):
     name: str
     base_url: str
 
-    @retry(stop=stop_after_attempt(MAX_RETRIES), wait=wait_exponential(multiplier=2))
+    @retry(stop=stop_after_attempt(MAX_RETRIES), wait=wait_exponential(multiplier=2), reraise=True)
     def _get(self, url: str, client: httpx.Client) -> httpx.Response:
         response = client.get(url, headers={"User-Agent": USER_AGENT}, timeout=REQUEST_TIMEOUT_SECONDS)
         response.raise_for_status()
