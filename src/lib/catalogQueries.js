@@ -4,11 +4,16 @@
 // reads directly, since Row Level Security already lets an admin see
 // unpublished rows, see supabase/migrations/009_rls.sql).
 
-const CARD_COLUMNS = "slug, type, canonical_title, release_year, country, poster_url, release_status";
+// titles.canonical_slug is the real column (see
+// supabase/migrations/002_titles.sql); there is no "slug" column on
+// titles, that name only exists on announcements. toCardData() below
+// still exposes it to the rest of the app as `slug` so components
+// like MediaCard.jsx do not need to change.
+const CARD_COLUMNS = "canonical_slug, type, canonical_title, release_year, country, poster_url, release_status";
 
 function toCardData(row) {
   return {
-    slug: row.slug,
+    slug: row.canonical_slug,
     type: row.type,
     title: row.canonical_title,
     year: row.release_year,
@@ -59,7 +64,7 @@ export async function getTitleBySlug(supabase, slug) {
   const { data } = await supabase
     .from("titles")
     .select("*")
-    .eq("slug", slug)
+    .eq("canonical_slug", slug)
     .eq("is_published", true)
     .single();
   return data;

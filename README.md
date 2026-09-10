@@ -32,7 +32,7 @@ ever written by the crawler pipeline or an admin.
 | Layer | Choice |
 | --- | --- |
 | Frontend | React (plain JavaScript, no TypeScript), Vite, react-router-dom, Tailwind CSS |
-| Backend | A small Python HTTP service for admin actions and the crawler trigger only |
+| Backend | FastAPI + Uvicorn, for admin actions and the crawler trigger only |
 | Auth, database, storage | Supabase (Auth, PostgreSQL, Storage, Row Level Security, Cron) |
 | Crawler | Python, httpx, BeautifulSoup, Pydantic, rapidfuzz |
 | Scheduling | Supabase Cron (pg_cron) calling a Supabase Edge Function, which calls the backend |
@@ -53,8 +53,15 @@ architecture described above:
 - All database tables and RLS policies are written as SQL migrations
   and are ready to run against a Supabase project.
 - The crawler pipeline (fetch, parse, normalize, validate, deduplicate,
-  change detect) is implemented and unit tested against realistic
-  sample data.
+  change detect, and write) is implemented and unit tested against
+  realistic sample data. A confidently matched or brand new item now
+  writes straight to the `titles` table (unpublished, so it is never
+  public by itself); only a genuinely uncertain match still waits in
+  the review queue. See docs/CRAWLER.md.
+- The backend (`crawler/worker.py`) is FastAPI on Uvicorn. One crawl is
+  one `crawl_runs` row from `queued` through to a final status, the
+  admin crawler page can poll `GET /runs/{id}` for live progress, and
+  a second crawl cannot be started while one is already in progress.
 - The crawler's three sources are GL Archive, AniList, and TMDB:
   - GL Archive (`crawler/sources/gl_archive.py`) scrapes the live
     catalog page directly. Its CSS selectors were checked against
@@ -80,9 +87,9 @@ cp .env.example .env   # fill in your Supabase project values
 npm run dev
 ```
 
-`npm run dev` starts the whole app, the React frontend and the small
-Python backend, with one command. There is nothing else to run
-separately for local development.
+`npm run dev` starts the whole app, the React frontend and the FastAPI
+backend, with one command. There is nothing else to run separately for
+local development.
 
 ## Documentation
 

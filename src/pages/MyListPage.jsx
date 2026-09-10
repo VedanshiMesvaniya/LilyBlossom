@@ -16,6 +16,7 @@ export function MyListPage() {
   const [searchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") ?? "watching";
   const [items, setItems] = useState([]);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!user) return;
@@ -24,18 +25,24 @@ export function MyListPage() {
     supabase
       .from("user_media_status")
       .select(
-        "status, current_episode, progress, titles(slug, type, canonical_title, release_year, country, poster_url, release_status)"
+        "status, current_episode, progress, titles(canonical_slug, type, canonical_title, release_year, country, poster_url, release_status)"
       )
       .eq("user_id", user.id)
       .eq("status", activeTab)
-      .then(({ data }) => {
+      .then(({ data, error: queryError }) => {
         if (!isMounted) return;
+        if (queryError) {
+          setError(queryError.message);
+          setItems([]);
+          return;
+        }
+        setError(null);
         const mapped = (data ?? [])
           .map((row) => {
             const t = row.titles;
             if (!t) return null;
             return {
-              slug: t.slug,
+              slug: t.canonical_slug,
               type: t.type,
               title: t.canonical_title,
               year: t.release_year,
@@ -75,7 +82,11 @@ export function MyListPage() {
         ))}
       </div>
 
-      <MediaGrid items={items} emptyLabel="Nothing here yet. Go add something to your list." />
+      {error ? (
+        <p className="font-ui text-sm text-red-500">Could not load your list: {error}</p>
+      ) : (
+        <MediaGrid items={items} emptyLabel="Nothing here yet. Go add something to your list." />
+      )}
     </div>
   );
 }
