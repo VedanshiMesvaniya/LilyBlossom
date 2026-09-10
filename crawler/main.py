@@ -45,13 +45,18 @@ def get_supabase() -> Client:
 
 
 def load_existing_candidates(supabase: Client) -> list[CandidateTitle]:
-    response = supabase.table("titles").select("id, canonical_title, release_year, country").execute()
+    response = supabase.table("titles").select(
+        "id, canonical_title, release_year, country, tmdb_id, imdb_id, anilist_id"
+    ).execute()
     return [
         CandidateTitle(
             id=row["id"],
             normalized_title=normalize_title(row["canonical_title"]),
             year=row.get("release_year"),
             country=row.get("country"),
+            tmdb_id=row.get("tmdb_id"),
+            imdb_id=row.get("imdb_id"),
+            anilist_id=row.get("anilist_id"),
         )
         for row in response.data
     ]
@@ -62,6 +67,8 @@ def run_crawl(dry_run: bool) -> CrawlRunSummary:
     all_items: list[RawCrawlItem] = []
     all_errors: list[str] = []
 
+    source_statuses: list[tuple[str, str]] = []
+
     with httpx.Client() as client:
         for adapter_cls in SOURCE_REGISTRY:
             adapter = adapter_cls()
@@ -70,13 +77,34 @@ def run_crawl(dry_run: bool) -> CrawlRunSummary:
             summary.items_found += len(items)
             all_items.extend(items)
             all_errors.extend(errors)
+
+            # A source that could not be reached at all (its fetch()
+            # raised) should be reported as "unavailable", not lumped
+            # in with a source that connected fine but skipped a few
+            # bad records. This keeps a single dead or rate-limited
+            # source (for example AniList returning 403) from looking
+            # like the whole crawl is broken.
+            fetch_failed = any("fetch failed" in error for error in errors)
+            if fetch_failed and not items:
+                status = "unavailable (" + errors[0].split("fetch failed: ", 1)[-1] + ")"
+            elif errors:
+                status = f"OK, {len(errors)} record(s) skipped"
+            else:
+                status = "OK"
+            source_statuses.append((adapter.name, status))
+
             time.sleep(1.5)  # politeness delay between sources
 
     supabase = None if dry_run else get_supabase()
     candidates = load_existing_candidates(supabase) if supabase else []
 
     for item in all_items:
-        best_candidate, score = find_best_match(item.title, item.year, candidates)
+        external_ids = {
+            "tmdb_id": item.tmdb_id,
+            "anilist_id": item.anilist_id,
+            "imdb_id": item.imdb_id,
+        }
+        best_candidate, score = find_best_match(item.title, item.year, candidates, external_ids)
         state = classify_match(score) if best_candidate else "new"
 
         if state == "duplicate":
@@ -104,7 +132,9 @@ def run_crawl(dry_run: bool) -> CrawlRunSummary:
 
     if dry_run:
         print("DRY RUN - nothing was written to the database.")
-    print(f"Sources checked: {summary.sources_checked}")
+    print("Sources:")
+    for name, status in source_statuses:
+        print(f"  {name}: {status}")
     print(f"Items found: {summary.items_found}")
     print(f"New: {summary.new_items}  Duplicates: {summary.duplicates}  Uncertain: {summary.uncertain_items}")
     print(f"Errors: {summary.errors}")

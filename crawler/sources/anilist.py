@@ -100,6 +100,8 @@ class AniListAdapter(SourceAdapter):
             cover = item.get("coverImage") or {}
             poster_url = cover.get("extraLarge") or cover.get("large")
 
+            anilist_id = item.get("id")
+
             records.append(
                 {
                     "title": title,
@@ -110,7 +112,8 @@ class AniListAdapter(SourceAdapter):
                     "status": status,
                     "description": item.get("description"),
                     "poster_url": poster_url,
-                    "source_url": item.get("siteUrl") or f"https://anilist.co/anime/{item.get('id')}",
+                    "source_url": item.get("siteUrl") or f"https://anilist.co/anime/{anilist_id}",
+                    "anilist_id": str(anilist_id) if anilist_id is not None else None,
                 }
             )
 
@@ -129,5 +132,6 @@ class AniListAdapter(SourceAdapter):
             poster_url=record.get("poster_url"),
             source_url=record.get("source_url", "https://anilist.co"),
             source_name=self.name,
+            anilist_id=record.get("anilist_id"),
         )
 

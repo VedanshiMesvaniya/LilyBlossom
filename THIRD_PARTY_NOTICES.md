@@ -16,10 +16,9 @@ used under its own license or terms.
   repository.
 - The Python dependencies listed in `crawler/requirements.txt`
   (including httpx, BeautifulSoup4, lxml, Pydantic, rapidfuzz,
-  supabase-py, python-dotenv, Playwright, and tenacity) are each used
-  under their own open source license, a mix of MIT, BSD, and
-  Apache 2.0. The exact license for each package is in that package's
-  own repository.
+  supabase-py, python-dotenv, and tenacity) are each used under their
+  own open source license, a mix of MIT, BSD, and Apache 2.0. The exact
+  license for each package is in that package's own repository.
 
 ## Fonts
 
@@ -31,24 +30,30 @@ used under its own license or terms.
 ## TMDB
 
 - If `TMDB_API_KEY` is configured, `crawler/sources/tmdb.py` calls The
-  Movie Database (TMDB) API to fill in poster images and descriptions.
-  This use is subject to TMDB's own terms of use, which require
-  attribution wherever TMDB sourced data or images are shown:
+  Movie Database (TMDB) API both to discover GL titles and to fill in
+  poster images and descriptions. This use is subject to TMDB's own
+  terms of use, which require attribution wherever TMDB sourced data
+  or images are shown:
   "This product uses the TMDB API but is not endorsed or certified by
-  TMDB." Add that line to the app before enabling this enrichment in
-  production, see `docs/CRAWLER.md`.
+  TMDB." Add that line to the app before enabling this in production,
+  see `docs/CRAWLER.md`.
+
+## AniList
+
+- `crawler/sources/anilist.py` calls AniList's public GraphQL API to
+  discover anime tagged `Yuri`. This use is subject to AniList's own
+  API terms of service. No API key is required for this public data.
 
 ## Third-party GL catalog sources
 
 - The crawler (`crawler/sources/`) reads publicly available listing
-  pages from an explicit allow list of GL catalog sites: GL Archive,
-  GL Central, GLThai, and ShipsBloom. Titles, descriptions, posters,
-  and other metadata found this way are used for cataloging and
-  discovery only. They remain the property of their original sources
-  and any underlying rights holders, such as studios, publishers, or
-  streaming platforms. This project does not claim ownership over
-  that content. An admin reviews every item before it is published,
-  see `docs/ADMIN.md` and `docs/CRAWLER.md`.
+  pages from GL Archive. Titles, descriptions, posters, and other
+  metadata found this way are used for cataloging and discovery only.
+  They remain the property of their original sources and any
+  underlying rights holders, such as studios, publishers, or streaming
+  platforms. This project does not claim ownership over that content.
+  An admin reviews every item before it is published, see
+  `docs/ADMIN.md` and `docs/CRAWLER.md`.
 
 ## Supabase
 

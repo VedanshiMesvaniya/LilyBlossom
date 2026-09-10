@@ -16,7 +16,11 @@ def validate_item(item: RawCrawlItem) -> None:
     if not item.title or not item.title.strip():
         raise ValidationError("Title is empty.")
 
-    if item.year is not None and (item.year < 1990 or item.year > CURRENT_YEAR + 5):
+    # GL Archive's live catalog contains legitimate pre-1990 titles (for
+    # example "Florida Enchantment", 1914), so 1990 was too strict a
+    # floor and was rejecting real, correctly parsed entries. 1900 is
+    # used instead as a plausible lower bound for any GL catalog title.
+    if item.year is not None and (item.year < 1900 or item.year > CURRENT_YEAR + 5):
         raise ValidationError(f"Year {item.year} is outside the plausible GL catalog range.")
 
     if item.episode_count is not None and item.episode_count < 0:
