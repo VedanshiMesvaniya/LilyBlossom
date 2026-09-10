@@ -34,7 +34,7 @@ ever written by the crawler pipeline or an admin.
 | Frontend | React (plain JavaScript, no TypeScript), Vite, react-router-dom, Tailwind CSS |
 | Backend | A small Python HTTP service for admin actions and the crawler trigger only |
 | Auth, database, storage | Supabase (Auth, PostgreSQL, Storage, Row Level Security, Cron) |
-| Crawler | Python, httpx, BeautifulSoup, Playwright (for JS rendered pages), Pydantic, rapidfuzz |
+| Crawler | Python, httpx, BeautifulSoup, Pydantic, rapidfuzz |
 | Scheduling | Supabase Cron (pg_cron) calling a Supabase Edge Function, which calls the backend |
 
 Almost everything talks to Supabase directly from the browser and
@@ -55,12 +55,16 @@ architecture described above:
 - The crawler pipeline (fetch, parse, normalize, validate, deduplicate,
   change detect) is implemented and unit tested against realistic
   sample data.
-- The specific CSS selectors inside each site adapter
-  (`crawler/sources/*.py`) are a best effort starting point. They have
-  not been verified against the live GL Archive, GL Central, GLThai or
-  ShipsBloom pages, because this build environment cannot reach those
-  domains. Read `docs/CRAWLER.md` before running the crawler for real,
-  and expect to adjust selectors against the actual site markup.
+- The crawler's three sources are GL Archive, AniList, and TMDB:
+  - GL Archive (`crawler/sources/gl_archive.py`) scrapes the live
+    catalog page directly. Its CSS selectors were checked against
+    that site's real markup.
+  - AniList and TMDB (`crawler/sources/anilist.py`,
+    `crawler/sources/tmdb.py`) use official, documented JSON APIs, not
+    scraping, so there is no markup to keep in sync. AniList can
+    return a temporary error or get rate limited; the crawler treats
+    that as one source being unavailable for that run rather than a
+    reason to fail the whole crawl, see `docs/CRAWLER.md`.
 - No Supabase project, TMDB key, or hosting has been provisioned yet.
   Nothing has been deployed. `docs/SETUP.md` walks through provisioning
   everything from scratch.

@@ -37,13 +37,14 @@ step to run.
 ## Backend
 
 The backend (`crawler/worker.py`) doubles as the crawler runner, so it
-is plain Python, not a serverless function, since Playwright and
-multi-source crawling do not fit comfortably inside a short lived
-function.
+is plain Python, not a serverless function, since multi-source
+crawling, retries, and (if a future adapter needs it) Playwright do
+not fit comfortably inside a short lived function.
 
 1. Build a container from the repository root with
    `crawler/requirements.txt` installed, plus
-   `playwright install --with-deps` if any adapter uses Playwright.
+   `playwright install --with-deps` only if a future adapter adds
+   Playwright as a dependency. No current adapter uses it.
 2. Run it with `python -m crawler.worker`. It listens on
    `CRAWLER_WORKER_PORT` (default `8787`) and exposes `/health`,
    `/run`, `/titles`, and `/announcements`, see `crawler/worker.py`'s

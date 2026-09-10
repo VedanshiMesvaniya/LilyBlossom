@@ -31,8 +31,7 @@ only talk to each other through the database or a small, narrow API:
                           |
          -------------------------------
          |                |                |
-      GL Archive        GLThai         ShipsBloom
-      GL Central
+      GL Archive        AniList          TMDB
          |                |                |
          -------------------------------
                           |
@@ -65,12 +64,13 @@ no second terminal to keep open for local development. See
 
 ## Why the crawler is not inside the frontend or a Supabase Edge Function
 
-The crawler needs a full Python environment with Playwright for
-JavaScript rendered pages, retry and backoff logic, and enough runtime
-to crawl several sources without hitting a serverless function's time
-limit. Supabase Edge Functions are a poor fit for that. Supabase is
-used for what it is strong at: auth, PostgreSQL, storage, Row Level
-Security, and scheduling.
+The crawler needs a full Python environment, with room to add
+Playwright later if a future source needs JavaScript rendering, plus
+retry and backoff logic, and enough runtime to crawl several sources
+without hitting a serverless function's time limit. Supabase Edge
+Functions are a poor fit for that. Supabase is used for what it is
+strong at: auth, PostgreSQL, storage, Row Level Security, and
+scheduling.
 
 The crawler runs as its own service (see `crawler/`) and is triggered
 on a schedule by Supabase Cron through a small Edge Function

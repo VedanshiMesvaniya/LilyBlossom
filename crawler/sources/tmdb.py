@@ -108,6 +108,7 @@ class TMDBAdapter(SourceAdapter):
                     "description": item.get("overview") or None,
                     "poster_url": poster_url,
                     "source_url": source_url,
+                    "tmdb_id": str(tmdb_id) if tmdb_id is not None else None,
                 }
             )
 
@@ -125,6 +126,7 @@ class TMDBAdapter(SourceAdapter):
             poster_url=record.get("poster_url"),
             source_url=record.get("source_url", "https://www.themoviedb.org"),
             source_name=self.name,
+            tmdb_id=record.get("tmdb_id"),
         )
 
 

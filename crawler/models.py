@@ -36,6 +36,9 @@ class RawCrawlItem(BaseModel):
     official_url: Optional[HttpUrl] = None
     source_url: HttpUrl
     source_name: str
+    tmdb_id: Optional[str] = None
+    anilist_id: Optional[str] = None
+    imdb_id: Optional[str] = None
 
 
 class NormalizedItem(RawCrawlItem):

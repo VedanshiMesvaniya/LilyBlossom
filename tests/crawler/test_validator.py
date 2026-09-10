@@ -30,3 +30,10 @@ def test_implausible_year_is_rejected():
     item = base_item(year=1800)
     with pytest.raises(ValidationError):
         validate_item(item)
+
+
+def test_legitimate_pre_1990_year_is_accepted():
+    # GL Archive's live catalog includes real, correctly parsed titles
+    # from before 1990 (for example a 1914 entry), so the floor must
+    # allow these through rather than rejecting them as bad data.
+    validate_item(base_item(year=1914))
