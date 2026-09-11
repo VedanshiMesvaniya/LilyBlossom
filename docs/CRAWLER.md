@@ -68,7 +68,15 @@ The three current sources are verified differently:
   catalog page with CSS selectors. Its selectors were checked against
   that site's real markup, but any GL Archive page redesign can break
   them silently, so re-check them if the crawl report shows an
-  unexpected drop in items from this source.
+  unexpected drop in items from this source. `fetch()` follows
+  pagination automatically, up to `MAX_GL_ARCHIVE_PAGES`
+  (`crawler/config.py`, default 20), by looking for a standard
+  `<link rel="next">` tag or an anchor labelled "Next" (or similar);
+  if the live site uses neither pattern, only page one is fetched,
+  the same as before this was added. This has not been checked
+  against the real site's pagination markup; confirm it by comparing
+  a dry run's GL Archive item count against the number of titles
+  visible on the live catalog page.
 - `crawler/sources/anilist.py` and `crawler/sources/tmdb.py` use
   official, documented JSON APIs (AniList's GraphQL API and the TMDB
   REST API), not scraping. There is no markup to keep in sync, but
@@ -119,10 +127,22 @@ is for.
 `crawler/sources/anilist.py` is a source adapter, registered in
 `SOURCE_REGISTRY`. It queries AniList's public GraphQL API for anime
 tagged `Yuri` and can create new titles on its own, the same as GL
-Archive. It needs no API key. AniList's API can be temporarily
-unavailable or rate limited; when that happens the crawler reports
-this source as `unavailable` for that run and continues with the
-other sources.
+Archive. It needs no API key. It pages through up to
+`MAX_ANILIST_PAGES` pages (`crawler/config.py`, default 5) using the
+`pageInfo.hasNextPage` field the query already requested, instead of
+only ever reading the first 50 results by popularity. AniList's API
+can be temporarily unavailable or rate limited; when that happens the
+crawler reports this source as `unavailable` for that run and
+continues with the other sources.
+
+## Announcements do not have a source yet
+
+There is an `announcements` table and an `/admin/announcements` page
+(publish/unpublish only, see `docs/ADMIN.md`), but no crawler adapter
+writes to it. This needs a product decision, not just code: which
+site(s) count as a legitimate, scrapeable or API-backed source for GL
+news/announcements. Until that is decided, announcement drafts can
+only be created directly in the database.
 
 ## TMDB
 

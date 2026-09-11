@@ -6,6 +6,7 @@ import {
 } from "react-router-dom";
 
 import { supabase } from "../lib/supabaseClient.js";
+import { sanitizeNextPath } from "../lib/sanitizeNextPath.js";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -61,8 +62,7 @@ export function LoginPage() {
         throw signInError;
       }
 
-      const next =
-        searchParams.get("next") || "/";
+      const next = sanitizeNextPath(searchParams.get("next"));
 
       navigate(next);
     } catch (err) {
