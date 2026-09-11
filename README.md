@@ -62,6 +62,16 @@ architecture described above:
   one `crawl_runs` row from `queued` through to a final status, the
   admin crawler page can poll `GET /runs/{id}` for live progress, and
   a second crawl cannot be started while one is already in progress.
+- The admin area works end to end: `/admin/crawler` polls a run live
+  and shows a per-source breakdown, `/admin/sources` can actually
+  enable/disable a source and change its priority, and
+  `/admin/review` can publish, reject, or merge a review queue item,
+  all logged to `admin_actions`. See docs/ADMIN.md.
+- Catalog pages show real loading and error states instead of a blank
+  screen or a silently empty list, and Series, Movies, and
+  Announcements are paginated rather than loading the whole catalog at
+  once. There is a working search box (`/search`) across canonical and
+  original titles.
 - The crawler's three sources are GL Archive, AniList, and TMDB:
   - GL Archive (`crawler/sources/gl_archive.py`) scrapes the live
     catalog page directly. Its CSS selectors were checked against

@@ -13,6 +13,13 @@ reach the browser:
     GET    /runs/{run_id}   poll one crawl run's live status
     PATCH  /titles          edit a title and log the admin action
     PATCH  /announcements   change an announcement's status and log it
+    PATCH  /sources         enable/disable a source or change its priority
+    POST   /review/{id}/publish  approve a crawl_item: publish its title,
+                                  or create one for an uncertain match
+    POST   /review/{id}/reject   mark a crawl_item rejected, no title write
+    POST   /review/{id}/merge    apply an uncertain match's data onto the
+                                  title it matched, same as a confident
+                                  crawler match would have
 
 Run it directly with:
 
@@ -38,7 +45,8 @@ from pydantic import BaseModel
 from supabase import create_client, Client
 
 from .config import CRAWLER_SECRET, ENVIRONMENT, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL
-from .main import run_crawl
+from .main import LockedTitleError, apply_update_to_title, insert_new_title, link_title_source, run_crawl
+from .models import RawCrawlItem
 
 # Allowed origin for browser requests. "*" is fine for local
 # development; set FRONTEND_ORIGIN to your deployed frontend's exact
@@ -86,6 +94,16 @@ ALLOWED_TITLE_FIELDS = {
 # client sent was passed straight to Postgres and only a check
 # constraint violation (a raw 500) caught a typo.
 ALLOWED_ANNOUNCEMENT_STATUSES = {"draft", "published", "unpublished"}
+
+# Explicit allow-list for PATCH /sources: an admin can turn a source
+# on/off and reorder it, not rewrite its URL or type from this
+# endpoint (that still means editing the migration/seed data).
+ALLOWED_SOURCE_FIELDS = {"enabled", "priority"}
+
+# crawl_items.state values the review queue will act on. "duplicate"
+# and "error" never reach here (see crawler/main.py); "rejected" means
+# an admin already resolved it.
+REVIEWABLE_STATES = {"new", "updated", "existing", "uncertain"}
 
 # crawl_runs.status values that mean "already busy" (see
 # supabase/migrations/005_crawler.sql). POST /run refuses to start a
@@ -326,6 +344,165 @@ async def patch_announcement(request: Request, authorization: Optional[str] = He
     ).execute()
 
     return {"announcement": updated}
+
+
+@app.patch("/sources")
+async def patch_source(request: Request, authorization: Optional[str] = Header(None)) -> dict:
+    """Lets Admin -> Sources actually control the crawler (previously
+    this page could only display sources, not change them; enabling or
+    disabling one had no real effect anywhere)."""
+    profile = _require_admin(authorization)
+    body: dict[str, Any] = await request.json()
+
+    source_id = body.get("id")
+    if not source_id:
+        raise HTTPException(status_code=400, detail="Missing source id.")
+
+    fields = {key: value for key, value in body.items() if key in ALLOWED_SOURCE_FIELDS}
+    if not fields:
+        raise HTTPException(status_code=400, detail="No editable fields provided.")
+
+    admin = get_admin_client()
+    before = admin.table("sources").select("*").eq("id", source_id).maybe_single().execute().data
+    if not before:
+        raise HTTPException(status_code=404, detail="Source not found.")
+
+    try:
+        updated_rows = admin.table("sources").update(fields).eq("id", source_id).execute().data
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    updated = updated_rows[0] if updated_rows else None
+
+    admin.table("admin_actions").insert(
+        {
+            "admin_id": profile["id"],
+            "action": "edit",
+            "entity_type": "source",
+            "entity_id": source_id,
+            "old_value": before,
+            "new_value": updated,
+        }
+    ).execute()
+
+    return {"source": updated}
+
+
+def _load_reviewable_crawl_item(admin: Client, crawl_item_id: str) -> dict:
+    crawl_item = admin.table("crawl_items").select("*").eq("id", crawl_item_id).maybe_single().execute().data
+    if not crawl_item:
+        raise HTTPException(status_code=404, detail="Crawl item not found.")
+    if crawl_item["state"] not in REVIEWABLE_STATES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"crawl_item is '{crawl_item['state']}' and is not waiting for review.",
+        )
+    return crawl_item
+
+
+@app.post("/review/{crawl_item_id}/publish")
+def publish_review_item(crawl_item_id: str, authorization: Optional[str] = Header(None)) -> dict:
+    """The admin review queue's Publish action. For a 'new' or
+    'updated' item the crawler already wrote (or updated) the title;
+    this just flips it live. For an 'uncertain' item, an admin looking
+    at it decided it is not actually the title it was compared to, so
+    this creates a new title for it instead, already published."""
+    profile = _require_admin(authorization)
+    admin = get_admin_client()
+    crawl_item = _load_reviewable_crawl_item(admin, crawl_item_id)
+
+    if crawl_item["state"] == "uncertain":
+        item = RawCrawlItem.model_validate(crawl_item["payload"])
+        title_id = insert_new_title(admin, item, source_name=item.source_name, published=True)
+        link_title_source(admin, title_id, crawl_item["source_id"], str(item.source_url))
+        admin.table("crawl_items").update({"matched_title_id": title_id, "state": "new"}).eq(
+            "id", crawl_item_id
+        ).execute()
+    else:
+        title_id = crawl_item["matched_title_id"]
+        if not title_id:
+            raise HTTPException(status_code=400, detail="This crawl item has no title to publish.")
+        admin.table("titles").update({"is_published": True, "updated_at": _now_iso()}).eq("id", title_id).execute()
+
+    title = admin.table("titles").select("*").eq("id", title_id).maybe_single().execute().data
+    admin.table("admin_actions").insert(
+        {
+            "admin_id": profile["id"],
+            "action": "publish",
+            "entity_type": "title",
+            "entity_id": title_id,
+            "new_value": title,
+        }
+    ).execute()
+
+    return {"title": title}
+
+
+@app.post("/review/{crawl_item_id}/reject")
+def reject_review_item(crawl_item_id: str, authorization: Optional[str] = Header(None)) -> dict:
+    """Marks a crawl_item rejected and removes it from the queue. Does
+    not delete or unpublish a title the crawler may already have
+    created for a 'new'/'updated' item: rejecting the crawl record
+    just stops it from being suggested again, it is not the same
+    action as deleting a title (there is no title editor/delete flow
+    yet, see ARCHITECTURE.md's phase list)."""
+    profile = _require_admin(authorization)
+    admin = get_admin_client()
+    crawl_item = _load_reviewable_crawl_item(admin, crawl_item_id)
+
+    updated = (
+        admin.table("crawl_items").update({"state": "rejected"}).eq("id", crawl_item_id).execute().data
+    )
+
+    admin.table("admin_actions").insert(
+        {
+            "admin_id": profile["id"],
+            "action": "reject",
+            "entity_type": "crawl_item",
+            "entity_id": crawl_item_id,
+            "old_value": crawl_item,
+        }
+    ).execute()
+
+    return {"crawl_item": updated[0] if updated else None}
+
+
+@app.post("/review/{crawl_item_id}/merge")
+def merge_review_item(crawl_item_id: str, authorization: Optional[str] = Header(None)) -> dict:
+    """The admin review queue's Merge action: confirms an 'uncertain'
+    match really is the same title crawler/deduplicator.py flagged it
+    against, and applies the crawl item's data to it exactly like a
+    confident crawler match would have."""
+    profile = _require_admin(authorization)
+    admin = get_admin_client()
+    crawl_item = _load_reviewable_crawl_item(admin, crawl_item_id)
+
+    title_id = crawl_item["matched_title_id"]
+    if not title_id:
+        raise HTTPException(status_code=400, detail="This crawl item has no matching title to merge into.")
+
+    item = RawCrawlItem.model_validate(crawl_item["payload"])
+    try:
+        changed = apply_update_to_title(admin, title_id, item, crawl_item["source_id"])
+    except LockedTitleError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    link_title_source(admin, title_id, crawl_item["source_id"], str(item.source_url))
+    admin.table("crawl_items").update({"state": "updated" if changed else "existing"}).eq(
+        "id", crawl_item_id
+    ).execute()
+
+    title = admin.table("titles").select("*").eq("id", title_id).maybe_single().execute().data
+    admin.table("admin_actions").insert(
+        {
+            "admin_id": profile["id"],
+            "action": "merge",
+            "entity_type": "title",
+            "entity_id": title_id,
+            "new_value": title,
+        }
+    ).execute()
+
+    return {"title": title}
 
 
 if __name__ == "__main__":

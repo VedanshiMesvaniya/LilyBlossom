@@ -181,6 +181,70 @@ def generate_unique_slug(supabase: Client | None, used_slugs: set[str], title: s
     return slug
 
 
+class LockedTitleError(Exception):
+    """Raised when something tried to change a locked title's fields.
+    The crawler pipeline catches this and silently skips the write (see
+    _upsert_item below); crawler/worker.py's admin review endpoints let
+    it surface as a 400 so an admin knows why a merge did nothing."""
+
+
+def insert_new_title(supabase: Client, item: RawCrawlItem, source_name: str, published: bool = False) -> str:
+    """Inserts a brand new titles row from one RawCrawlItem. Shared by
+    the crawler's own pipeline (always unpublished) and the admin
+    review queue's "publish" action on an uncertain item (published
+    immediately, since a human just looked at it), see
+    crawler/worker.py's POST /review/{id}/publish."""
+    fields = _without_nones(build_title_fields(item))
+    fields["canonical_slug"] = generate_unique_slug(supabase, set(), item.title, item.year)
+    fields["classification_source"] = source_name
+    fields["is_published"] = published
+    inserted = supabase.table("titles").insert(fields).execute().data
+    if not inserted:
+        raise RuntimeError("Insert into titles returned no row.")
+    return inserted[0]["id"]
+
+
+def apply_update_to_title(supabase: Client, title_id: str, item: RawCrawlItem, source_id: str | None) -> bool:
+    """Compares `item` against the existing titles row and writes any
+    real changes, logging each to title_changes. Returns whether
+    anything actually changed. Raises LockedTitleError instead of
+    silently doing nothing when the title is is_locked, since callers
+    differ on what "nothing happened" should mean (see below)."""
+    existing_row = supabase.table("titles").select("*").eq("id", title_id).single().execute().data
+    if not existing_row:
+        raise RuntimeError(f"Title {title_id} not found.")
+    if existing_row.get("is_locked"):
+        raise LockedTitleError(f"Title {title_id} is locked; refusing to overwrite its fields.")
+
+    changes = detect_changes(existing_row, build_title_fields(item))
+    if not changes:
+        return False
+
+    update_fields = {change.field: change.new_value for change in changes}
+    update_fields["updated_at"] = _now_iso()
+    supabase.table("titles").update(update_fields).eq("id", title_id).execute()
+    for change in changes:
+        supabase.table("title_changes").insert(
+            {
+                "title_id": title_id,
+                "field": change.field,
+                "old_value": None if change.old_value is None else str(change.old_value),
+                "new_value": None if change.new_value is None else str(change.new_value),
+                "source_id": source_id,
+            }
+        ).execute()
+    return True
+
+
+def link_title_source(supabase: Client, title_id: str, source_id: str | None, source_url: str) -> None:
+    if not source_id:
+        return
+    supabase.table("title_sources").upsert(
+        {"title_id": title_id, "source_id": source_id, "source_url": source_url},
+        on_conflict="title_id,source_id",
+    ).execute()
+
+
 def _upsert_item(
     item: RawCrawlItem,
     source_name: str,
@@ -206,24 +270,20 @@ def _upsert_item(
 
     if match_state == "new":
         if write:
+            title_id = insert_new_title(supabase, item, source_name, published=False)
             fields = _without_nones(build_title_fields(item))
             fields["canonical_slug"] = generate_unique_slug(supabase, used_slugs, item.title, item.year)
-            fields["classification_source"] = source_name
-            fields["is_published"] = False
-            inserted = supabase.table("titles").insert(fields).execute().data
-            title_id = inserted[0]["id"] if inserted else None
-            if title_id:
-                candidates.append(
-                    CandidateTitle(
-                        id=title_id,
-                        normalized_title=normalize_title(item.title),
-                        year=item.year,
-                        country=item.country,
-                        tmdb_id=item.tmdb_id,
-                        imdb_id=item.imdb_id,
-                        anilist_id=item.anilist_id,
-                    )
+            candidates.append(
+                CandidateTitle(
+                    id=title_id,
+                    normalized_title=normalize_title(item.title),
+                    year=item.year,
+                    country=item.country,
+                    tmdb_id=item.tmdb_id,
+                    imdb_id=item.imdb_id,
+                    anilist_id=item.anilist_id,
                 )
+            )
 
     elif match_state == "duplicate":
         # A confident match (shared external ID, or fuzzy score above
@@ -231,27 +291,11 @@ def _upsert_item(
         # be treated as "nothing to do"; now it is the update path.
         title_id = best_candidate.id
         if write:
-            existing_row = supabase.table("titles").select("*").eq("id", title_id).single().execute().data
-            if existing_row and not existing_row.get("is_locked"):
-                changes = detect_changes(existing_row, build_title_fields(item))
-                if changes:
-                    update_fields = {change.field: change.new_value for change in changes}
-                    update_fields["updated_at"] = _now_iso()
-                    supabase.table("titles").update(update_fields).eq("id", title_id).execute()
-                    for change in changes:
-                        supabase.table("title_changes").insert(
-                            {
-                                "title_id": title_id,
-                                "field": change.field,
-                                "old_value": None if change.old_value is None else str(change.old_value),
-                                "new_value": None if change.new_value is None else str(change.new_value),
-                                "source_id": source_row["id"] if source_row else None,
-                            }
-                        ).execute()
+            try:
+                if apply_update_to_title(supabase, title_id, item, source_row["id"] if source_row else None):
                     crawl_state = "updated"
-            # is_locked = true: an admin-approved title. Seen again by
-            # the crawler, but its fields are never touched (product
-            # spec: locked titles are protected from overwrite).
+            except LockedTitleError:
+                pass  # is_locked: seen again by the crawler, fields never touched.
 
     else:
         # uncertain: confidence is too low to auto-match, too high to
@@ -302,6 +346,7 @@ def run_crawl(dry_run: bool, run_id: str | None = None, supabase: Client | None 
     all_items: list[tuple[RawCrawlItem, str, dict | None]] = []
     all_errors: list[str] = []
     source_statuses: list[tuple[str, str]] = []
+    source_results: list[dict] = []
     successful_sources = 0
 
     if supabase is None and not dry_run:
@@ -340,6 +385,7 @@ def run_crawl(dry_run: bool, run_id: str | None = None, supabase: Client | None 
                 status = "OK"
                 successful_sources += 1
             source_statuses.append((adapter.name, status))
+            source_results.append({"name": adapter.name, "status": status, "items_found": len(items)})
 
             if supabase is not None and source_row is not None:
                 source_update = {"last_crawled_at": _now_iso()}
@@ -430,6 +476,7 @@ def run_crawl(dry_run: bool, run_id: str | None = None, supabase: Client | None 
                 "duplicates": summary.duplicates,
                 "uncertain_items": summary.uncertain_items,
                 "errors": summary.errors,
+                "source_results": source_results,
             }
         ).eq("id", run_id).execute()
 
