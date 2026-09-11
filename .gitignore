@@ -29,3 +29,7 @@ Thumbs.db
 # Test / coverage
 coverage/
 .pytest_cache/
+
+
+# Ui screenshot 
+ui_screenshots/
