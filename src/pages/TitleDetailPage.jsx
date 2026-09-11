@@ -13,7 +13,6 @@ export function TitleDetailPage({ type }) {
   const { slug } = useParams();
   const { user } = useAuth();
   const [title, setTitle] = useState(null);
-  const [userStatus, setUserStatus] = useState(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState(null);
@@ -40,17 +39,6 @@ export function TitleDetailPage({ type }) {
         return;
       }
       setTitle(data);
-
-      if (user) {
-        const { data: statusRow } = await supabase
-          .from("user_media_status")
-          .select("status")
-          .eq("user_id", user.id)
-          .eq("title_id", data.id)
-          .maybeSingle();
-        if (isMounted) setUserStatus(statusRow?.status ?? null);
-      }
-
       setLoading(false);
     }
 
@@ -58,7 +46,7 @@ export function TitleDetailPage({ type }) {
     return () => {
       isMounted = false;
     };
-  }, [slug, type, user]);
+  }, [slug, type]);
 
   if (loading) {
     return (
@@ -115,7 +103,7 @@ export function TitleDetailPage({ type }) {
 
           {user && (
             <div className="mt-6">
-              <TrackingControls titleId={title.id} initialStatus={userStatus} />
+              <TrackingControls titleId={title.id} />
             </div>
           )}
         </div>

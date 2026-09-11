@@ -72,6 +72,12 @@ architecture described above:
   Announcements are paginated rather than loading the whole catalog at
   once. There is a working search box (`/search`) across canonical and
   original titles.
+- Personal tracking covers the full schema, not just watch status:
+  favoriting a title, setting watch progress (which auto-completes a
+  title at 100%, see `supabase/migrations/003_user_tracking.sql`), and
+  a `/profile` edit form for username, bio, favorite GL, and favorite
+  pairing, all previously present in the database but not reachable
+  from any page.
 - The crawler's three sources are GL Archive, AniList, and TMDB:
   - GL Archive (`crawler/sources/gl_archive.py`) scrapes the live
     catalog page directly. Its CSS selectors were checked against
