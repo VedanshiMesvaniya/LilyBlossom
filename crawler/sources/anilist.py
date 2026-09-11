@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from ..config import CURRENT_YEAR, MAX_RETRIES, REQUEST_TIMEOUT_SECONDS, USER_AGENT
+from ..config import CURRENT_YEAR, MAX_ANILIST_PAGES, MAX_RETRIES, REQUEST_TIMEOUT_SECONDS, USER_AGENT
 from ..models import RawCrawlItem
 from .base import SourceAdapter
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -73,9 +73,17 @@ class AniListAdapter(SourceAdapter):
         return response.json()
 
     def fetch(self, client: httpx.Client) -> list[str]:
-        # Fetch initial page (up to 50 entries)
-        data = self._post(client, YURI_QUERY, {"page": 1, "perPage": 50})
-        return [json.dumps(data)]
+        payloads = []
+        page = 1
+        has_next_page = True
+
+        while has_next_page and page <= MAX_ANILIST_PAGES:
+            data = self._post(client, YURI_QUERY, {"page": page, "perPage": 50})
+            payloads.append(json.dumps(data))
+            has_next_page = bool(data.get("data", {}).get("Page", {}).get("pageInfo", {}).get("hasNextPage"))
+            page += 1
+
+        return payloads
 
     def parse(self, raw_payload: str) -> list[dict[str, Any]]:
         data = json.loads(raw_payload)

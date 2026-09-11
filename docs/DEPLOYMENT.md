@@ -42,22 +42,30 @@ function, since multi-source crawling, retries, and (if a future
 adapter needs it) Playwright do not fit comfortably inside a short
 lived function.
 
-1. Build a container from the repository root with
-   `crawler/requirements.txt` installed (this now includes `fastapi`
-   and `uvicorn`), plus `playwright install --with-deps` only if a
-   future adapter adds Playwright as a dependency. No current adapter
-   uses it.
-2. Run it with `uvicorn crawler.worker:app --host 0.0.0.0 --port $PORT`.
-   **Always use a single worker** (the default; do not pass
-   `--workers` with a value greater than 1). The crawl-in-progress lock
-   in `POST /run` and the background crawl task both only work within
-   one process; more than one worker process could start overlapping
-   crawls against the same database. It listens on `CRAWLER_WORKER_PORT`
-   (or `$PORT`, default `8787`) and exposes `/health`, `/run`,
-   `/runs/{run_id}`, `/titles`, and `/announcements`, see
-   `crawler/worker.py`'s module docstring for what each does.
-3. Deploy that container to Render, Railway, Fly.io, or a VM you
-   control, with `VITE_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+1. Build the image from the repository root using the included
+   `Dockerfile`:
+   ```
+   docker build -t lilyblossom-backend .
+   ```
+   It installs `crawler/requirements.txt` (this now includes `fastapi`
+   and `uvicorn`). Add `playwright install --with-deps` to the
+   Dockerfile only if a future adapter adds Playwright as a
+   dependency; no current adapter uses it.
+2. Run it with:
+   ```
+   docker run --env-file .env -p 8787:8787 lilyblossom-backend
+   ```
+   which runs `uvicorn crawler.worker:app --host 0.0.0.0 --port 8787
+   --workers 1` internally. **Always use a single worker** (the
+   image's default; do not override `--workers` to a value greater
+   than 1). The crawl-in-progress lock in `POST /run` and the
+   background crawl task both only work within one process; more than
+   one worker process could start overlapping crawls against the same
+   database. It exposes `/health`, `/run`, `/runs/{run_id}`, `/titles`,
+   `/sources`, `/announcements`, and `/review/{id}/publish|reject|merge`,
+   see `crawler/worker.py`'s module docstring for what each does.
+3. Deploy that image to Render, Railway, Fly.io, or a VM you control,
+   with `VITE_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
    `CRAWLER_SECRET`, and `TMDB_API_KEY` set as environment variables
    there. Also set `ENVIRONMENT=production` and `FRONTEND_ORIGIN` to
    your deployed frontend's exact URL: the backend refuses to start
@@ -65,6 +73,23 @@ lived function.
    the default of `*` is only meant for local development.
 4. Confirm `python -m crawler.main --dry-run` succeeds against that
    deployment's environment before wiring the scheduler to it.
+
+## Monitoring and backups
+
+Neither of these need application code changes; they are Supabase
+project settings:
+
+- Supabase's project dashboard has built-in daily backups on paid
+  tiers, and point-in-time recovery on some plans. Confirm the
+  project's backup tier matches what real user and catalog data
+  actually needs before going live; this has not been decided yet.
+- For the backend itself, whatever platform it is deployed to
+  (Render/Railway/Fly/a VM) has its own basic uptime and log
+  monitoring; nothing in this repository assumes a specific one.
+  `crawl_runs.status` in the database is itself a simple health signal
+  a lightweight external check (e.g. a `failed` status followed by no
+  new `crawl_runs` row for a day) could alert on, if that is wanted
+  later.
 
 ## Scheduling
 

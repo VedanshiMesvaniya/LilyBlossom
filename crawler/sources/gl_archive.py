@@ -5,11 +5,12 @@ series and movies, including release states such as on-air, in-production,
 completed, upcoming, and announced (product spec section 18).
 """
 from typing import Any
+from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
 
-from ..config import CURRENT_YEAR
+from ..config import MAX_GL_ARCHIVE_PAGES
 from ..models import RawCrawlItem
 from .base import SourceAdapter
 
@@ -23,14 +24,54 @@ STATUS_MAP = {
     "cancelled": "Cancelled",
 }
 
+# Text on a "go to the next page" link/button, checked case
+# insensitively. This environment cannot reach glarchive.net to see
+# its real pagination markup, so rather than guess a specific
+# selector (and risk silently skipping pages if the guess is wrong),
+# _find_next_page_url() below looks for the two ways sites commonly
+# expose this that do not require guessing: a standard
+# <link rel="next"> tag, or an anchor whose visible text says one of
+# these. If neither is present, fetch() correctly stops at one page,
+# exactly like before, rather than fetching something wrong.
+NEXT_PAGE_LINK_TEXT = {"next", "next page", "load more", "»", "more"}
+
 
 class GLArchiveAdapter(SourceAdapter):
     name = "GL Archive"
     base_url = "https://glarchive.net/catalog/"
 
+    def _find_next_page_url(self, html: str, current_url: str) -> str | None:
+        soup = BeautifulSoup(html, "lxml")
+
+        link_next = soup.select_one("link[rel='next']")
+        if link_next and link_next.get("href"):
+            return urljoin(current_url, link_next["href"])
+
+        for anchor in soup.select("a[href]"):
+            text = anchor.get_text(strip=True).lower()
+            if text in NEXT_PAGE_LINK_TEXT:
+                next_url = urljoin(current_url, anchor["href"])
+                if next_url != current_url:
+                    return next_url
+
+        return None
+
     def fetch(self, client: httpx.Client) -> list[str]:
-        response = self._get(self.base_url, client)
-        return [response.text]
+        pages: list[str] = []
+        seen_urls: set[str] = set()
+        url = self.base_url
+
+        for _ in range(MAX_GL_ARCHIVE_PAGES):
+            response = self._get(url, client)
+            pages.append(response.text)
+            seen_urls.add(url)
+
+            next_url = self._find_next_page_url(response.text, url)
+            if not next_url or next_url in seen_urls:
+                break
+            url = next_url
+
+        return pages
 
     def parse(self, raw_payload: str) -> list[dict[str, Any]]:
         soup = BeautifulSoup(raw_payload, "lxml")
