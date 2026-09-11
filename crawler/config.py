@@ -22,6 +22,16 @@ TMDB_API_KEY = os.environ.get("TMDB_API_KEY", "")
 CRAWLER_SECRET = os.environ.get("CRAWLER_SECRET", "")
 CRAWLER_WORKER_PORT = int(os.environ.get("CRAWLER_WORKER_PORT", "8787"))
 
+# "development" (default) allows FRONTEND_ORIGIN to fall back to "*".
+# Set ENVIRONMENT=production to require a real FRONTEND_ORIGIN value,
+# see crawler/worker.py.
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
+
+# Upper bound on how many /discover pages crawler/sources/tmdb.py will
+# request per type (TV, movie) per run, so a very large GL result set
+# cannot make a single crawl run unbounded.
+MAX_TMDB_PAGES = int(os.environ.get("MAX_TMDB_PAGES", "5"))
+
 CURRENT_YEAR = date.today().year
 
 REQUEST_TIMEOUT_SECONDS = 20

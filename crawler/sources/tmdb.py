@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 import httpx
 
-from ..config import CURRENT_YEAR, MAX_RETRIES, REQUEST_TIMEOUT_SECONDS, TMDB_API_KEY, USER_AGENT
+from ..config import CURRENT_YEAR, MAX_RETRIES, MAX_TMDB_PAGES, REQUEST_TIMEOUT_SECONDS, TMDB_API_KEY, USER_AGENT
 from ..models import RawCrawlItem
 from .base import SourceAdapter
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -47,30 +47,37 @@ class TMDBAdapter(SourceAdapter):
         response.raise_for_status()
         return response.json()
 
+    def _fetch_all_pages(self, client: httpx.Client, endpoint: str, item_type: str) -> list[str]:
+        """Pages through one /discover endpoint up to MAX_TMDB_PAGES,
+        stopping early once TMDB reports there are no more pages left.
+        Without this, only the first ~20 results were ever collected
+        regardless of how many GL titles TMDB actually has."""
+        payloads = []
+        page = 1
+        total_pages = 1
+
+        while page <= min(total_pages, MAX_TMDB_PAGES):
+            data = self._fetch_endpoint(
+                client,
+                endpoint,
+                {"with_keywords": GL_KEYWORD_IDS, "sort_by": "popularity.desc", "page": page},
+            )
+            data["_type"] = item_type
+            payloads.append(json.dumps(data))
+
+            total_pages = data.get("total_pages") or 1
+            page += 1
+
+        return payloads
+
     def fetch(self, client: httpx.Client) -> list[str]:
         if not TMDB_API_KEY:
             # If no API key is provided, return empty without raising
             return []
 
         payloads = []
-        # Discover GL TV series
-        tv_data = self._fetch_endpoint(
-            client,
-            "/discover/tv",
-            {"with_keywords": GL_KEYWORD_IDS, "sort_by": "popularity.desc"},
-        )
-        tv_data["_type"] = "Series"
-        payloads.append(json.dumps(tv_data))
-
-        # Discover GL Movies
-        movie_data = self._fetch_endpoint(
-            client,
-            "/discover/movie",
-            {"with_keywords": GL_KEYWORD_IDS, "sort_by": "popularity.desc"},
-        )
-        movie_data["_type"] = "Movie"
-        payloads.append(json.dumps(movie_data))
-
+        payloads.extend(self._fetch_all_pages(client, "/discover/tv", "Series"))
+        payloads.extend(self._fetch_all_pages(client, "/discover/movie", "Movie"))
         return payloads
 
     def parse(self, raw_payload: str) -> list[dict[str, Any]]:

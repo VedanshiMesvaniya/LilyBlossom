@@ -7,13 +7,25 @@ ARCHITECTURE.md for how the two fit together.
 
 ## Pipeline
 
-For every enabled row in the `sources` table's corresponding adapter:
+For every enabled row in the `sources` table's corresponding adapter
+(`crawler/main.py`'s `load_enabled_sources()`; this is what
+Admin -> Sources actually controls):
 
 ```
 fetch -> parse -> normalize -> validate -> deduplicate -> compare against
-existing titles -> classify as new, duplicate, or uncertain -> store as
-a crawl_item -> admin reviews -> publish
+existing titles ->
+  no match           -> insert a new (unpublished) titles row
+  confident match     -> update the titles row if anything changed,
+                          unless it is locked
+  unclear match        -> leave as `uncertain` in crawl_items for review
+-> link title_sources -> store as a crawl_item, tagged with the run
+   that found it -> admin publishes (or corrects) when ready
 ```
+
+A crawler-created title is always written with `is_published = false`.
+Nothing it finds is public until an admin publishes it, see
+`docs/ADMIN.md`. The only case still fully gated behind admin review
+before it touches `titles` at all is a genuinely unclear match.
 
 One broken source never stops the others. Each adapter's `run()`
 method (in `crawler/sources/base.py`) catches its own errors and
@@ -30,9 +42,16 @@ reading every error line.
    from `crawler/sources/base.py`.
 2. Implement `fetch()`, `parse()`, and `normalize()`. Each must return
    the types described in `crawler/sources/base.py`'s docstring.
-3. Add a row to the `sources` table (through the admin UI or SQL) with
-   `source_type = 'catalog'` and the real URL.
-4. Register the class in `SOURCE_REGISTRY` inside `crawler/main.py`.
+3. Register the class in `SOURCE_REGISTRY` inside `crawler/main.py`.
+   This is only the fallback list used when the `sources` table has no
+   rows at all (a fresh database).
+4. Add a row to the `sources` table (through the admin UI or SQL) with
+   `source_type = 'catalog'`, the real URL, and a `name` that matches
+   the adapter class's `name` attribute exactly. This is the row that
+   actually turns the adapter on: `load_enabled_sources()` in
+   `crawler/main.py` only runs adapters with a matching, `enabled`
+   `sources` row (see `supabase/migrations/012_seed_sources.sql` for
+   the three current sources).
 
 Nothing else in the pipeline needs to change. `main.py` does not know
 or care how many sources exist.
@@ -88,8 +107,12 @@ for that source.
    - 0.80 to 0.95: queued for admin review (`uncertain`)
    - below 0.80: treated as a different title (`new`)
 
-Nothing is ever auto merged. The admin review queue is the only place
-a duplicate is confirmed and merged.
+A confident match (0.95+, or a shared external ID) updates the
+existing title's metadata directly if anything actually changed; it
+does not create a second row for the same title. Nothing is ever auto
+merged across two different existing title rows; that, and resolving
+the 0.80-0.95 "uncertain" band, is still what the admin review queue
+is for.
 
 ## AniList
 
@@ -109,7 +132,12 @@ other sources.
   It discovers GL live-action titles through TMDB's `/discover/tv` and
   `/discover/movie` endpoints filtered to GL specific keyword IDs
   (lesbian romance, yuri, girls' love, GL), so it does not pull in
-  TMDB's general catalog.
+  TMDB's general catalog. It pages through up to `MAX_TMDB_PAGES`
+  pages per endpoint (`crawler/config.py`, default 5), stopping early
+  once TMDB reports there are no more pages, rather than only ever
+  reading page 1. The current `GL_KEYWORD_IDS` have not been verified
+  against a live TMDB account; confirm they map to the intended GL/
+  Yuri classifications before relying on TMDB result counts.
 - `TMDBEnricher` is a separate, optional enrichment step. Given a
   title a different adapter already found, it can fill in `poster_url`
   and `description` through TMDB's search endpoint. It never creates a

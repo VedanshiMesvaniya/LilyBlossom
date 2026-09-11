@@ -50,10 +50,11 @@ Almost everything in that diagram is just "React talks to Supabase
 directly." Browsing the catalog, signing in, and personal tracking
 never touch a server of ours at all, they rely on Supabase's Row Level
 Security (see `supabase/migrations/009_rls.sql`) as the real access
-boundary. The one small Python backend (`crawler/worker.py`) exists
-only for the handful of actions that need the service-role key, which
-must never reach the browser: triggering a crawl, and the two admin
-edit actions that write an audit log entry.
+boundary. The one small backend (`crawler/worker.py`, FastAPI on
+Uvicorn) exists only for the handful of actions that need the
+service-role key, which must never reach the browser: triggering a
+crawl, polling a crawl run's live status, and the two admin edit
+actions that write an audit log entry.
 
 ## One command starts everything
 
@@ -82,26 +83,59 @@ actually runs in production.
 ## Why a small Python backend instead of a Node one
 
 The crawler pipeline was already Python. Rather than run a second
-runtime just to hold a few admin endpoints, `crawler/worker.py` uses
-Python's standard library HTTP server to expose the same three
-endpoints a Node service would have needed. One runtime, one process,
-one thing to deploy alongside the crawler.
+runtime just to hold a few admin endpoints, `crawler/worker.py` is a
+FastAPI app served by Uvicorn. One runtime, one process, one thing to
+deploy alongside the crawler.
+
+This used to be hand-rolled on Python's standard library `http.server`.
+That module could not run a crawl as a real background task tied to
+its own `crawl_runs` row, which is what caused the crawl status bug:
+the admin page's POST `/run` inserted one row, then the crawler wrote
+a second row of its own when it finished, so the same crawl could show
+as both "Completed" and "queued" at once. FastAPI's `BackgroundTasks`
+plus one row updated in place (queued -> running -> a final status)
+fixed that; see "Data flow for a new title" below and
+`crawler/main.py`'s `run_crawl()`. Run Uvicorn with a single worker
+(`--workers 1`, the default): the crawl lock in `POST /run` and the
+background task both only make sense within one process.
 
 ## Data flow for a new title
 
+This changed from the original design, where the crawler only ever
+wrote to `crawl_items` and an admin action was what first created a
+`titles` row. That meant a crawl could report thousands of items found
+while `titles` stayed empty, which was never a working catalog. The
+crawler now writes `titles` directly for anything it can match with
+real confidence, and only leaves a genuinely unclear match for a human:
+
 1. A source adapter in `crawler/sources/` fetches a listing page from
-   one allow listed source.
+   one enabled row in the `sources` table (`crawler/main.py`'s
+   `load_enabled_sources()`; Admin -> Sources controls this).
 2. `normalizer.py` cleans the title text so different casing,
    punctuation, or hyphenation do not look like different titles.
-3. `deduplicator.py` fuzzy matches the normalized title against titles
-   already in the database using rapidfuzz.
-4. Based on the match score, the item is classified as `new`,
-   `duplicate`, or `uncertain` and written to `crawl_items` alongside
-   the run it came from.
-5. An admin opens `/admin/review`, sees the new or uncertain items, and
-   publishes, rejects, merges, or corrects them.
-6. Only after an admin action does a title become visible to normal
-   users. Nothing the crawler finds is public by default.
+3. `deduplicator.py` checks a shared external ID (TMDB, AniList, IMDb)
+   first, then falls back to a rapidfuzz match against titles already
+   in the database.
+4. Based on that:
+   - No match: a new `titles` row is inserted, `is_published = false`.
+   - A confident match: `change_detector.py` compares the incoming
+     metadata against the existing row. A real difference updates that
+     row and logs a `title_changes` entry; no difference touches
+     nothing. Either way, unless the existing title is `is_locked`, in
+     which case the crawler never writes to it at all.
+   - An unclear match (0.80-0.95 fuzzy confidence): nothing is written
+     to `titles`. It waits in `crawl_items` as `uncertain` for a human.
+5. Every title the item touched, new or existing, gets a `title_sources`
+   row linking it back to where it was found.
+6. Every item is also logged to `crawl_items` (state: `new`, `updated`,
+   `existing`, or `uncertain`) alongside the `crawl_runs` row it came
+   from, so the admin crawler page has a full per-run history.
+7. An admin still opens `/admin/review` to resolve `uncertain` items
+   (publish as new, merge into an existing title, or reject) and to
+   flip `is_published` on titles the crawler already created. Nothing
+   the crawler writes is visible to normal users until an admin
+   publishes it: `is_published` starts `false` on every crawler-created
+   row, full stop.
 
 ## Data flow for personal tracking
 
@@ -117,8 +151,12 @@ another user's tracking data.
 ## What can change without breaking this shape
 
 - Adding a new crawler source means adding one file under
-  `crawler/sources/` and registering it in `crawler/main.py`'s
-  `SOURCE_REGISTRY`. Nothing else in the pipeline needs to change.
+  `crawler/sources/`, registering it in `crawler/main.py`'s
+  `SOURCE_REGISTRY` (the fallback list), and adding a row for it to the
+  `sources` table with a matching `name` (through the admin UI or a
+  migration, see `supabase/migrations/012_seed_sources.sql`) so
+  Admin -> Sources can actually enable or disable it. Nothing else in
+  the pipeline needs to change.
 - Adding a new catalog filter or sort option is a change to
   `src/lib/catalogQueries.js` and the relevant page, not to the schema.
 - Swapping the backend's hosting target (Render, Railway, Fly.io, a

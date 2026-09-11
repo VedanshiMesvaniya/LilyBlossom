@@ -19,18 +19,27 @@ real boundary, see "What admins cannot bypass" below.
 ```
 Crawler runs
      |
-Trusted GL sources checked
+Trusted, enabled GL sources checked (Admin -> Sources controls this list)
      |
-New, updated, duplicate, and uncertain items identified
+New titles created, existing titles updated, unclear matches held back
      |
-Stored as crawl_items, linked to the crawl_run that found them
+Every item stored as a crawl_item, linked to the crawl_run that found it
      |
 Admin opens /admin/review
      |
-Admin publishes, rejects, merges, or corrects each item
+Admin resolves any uncertain items (publish, reject, or merge),
+and publishes whichever crawler-created titles are ready to go live
      |
-Published titles become visible to everyone
+Published titles (is_published = true) become visible to everyone
 ```
+
+Titles the crawler is confident about (a brand new title, or an
+update to one it already knows) are written to `titles` right away,
+but always with `is_published = false`, so review still happens
+before anything is public, it just happens as "check and publish"
+rather than "create from scratch." Only a genuinely unclear match
+still sits purely in `crawl_items` until a human resolves it. See
+`docs/CRAWLER.md` and `ARCHITECTURE.md`'s "Data flow for a new title".
 
 ## Pages
 
@@ -38,9 +47,10 @@ Published titles become visible to everyone
   pending announcements, with links into the rest of the admin area.
 - `/admin/crawler`: the most recent crawl run's stats, and a button to
   trigger a new run on demand.
-- `/admin/review`: every `crawl_item` still in the `new` or `uncertan`
-  state, with match confidence, so an admin can decide whether to
-  publish, reject, or merge it.
+- `/admin/review`: every `crawl_item` in the `new`, `updated`, or
+  `uncertain` state, with match confidence, so an admin can publish a
+  crawler-created or crawler-updated title, or decide whether to
+  publish, reject, or merge an uncertain one.
 - `/admin/announcements`: every announcement, draft or published, with
   publish and unpublish actions.
 - `/admin/sources`: the crawlable source allow list, with the last
