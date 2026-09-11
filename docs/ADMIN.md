@@ -7,12 +7,13 @@ database owner, sets `profiles.role = 'admin'` directly, see
 `docs/SETUP.md` step 6. `/admin` and every `/admin/*` page is wrapped
 in the `RequireAdmin` component (`src/components/ProtectedRoute.jsx`),
 which checks this column. A non admin who navigates to `/admin` gets
-an explicit message, not a hidden page that merely looks empty. The
-two admin actions that write an audit log entry (editing a title,
-changing an announcement's status) go through the Python backend
-(`crawler/worker.py`), which independently checks the same column
-before doing anything, since a page-level check alone is never the
-real boundary, see "What admins cannot bypass" below.
+an explicit message, not a hidden page that merely looks empty. Every
+admin action that writes an audit log entry (editing a title, editing
+a source, changing an announcement's status, and publishing,
+rejecting, or merging a review queue item) goes through the FastAPI
+backend (`crawler/worker.py`), which independently checks the same
+column before doing anything, since a page-level check alone is never
+the real boundary, see "What admins cannot bypass" below.
 
 ## Daily flow
 
@@ -45,17 +46,26 @@ still sits purely in `crawl_items` until a human resolves it. See
 
 - `/admin`: counts of series, movies, currently airing, upcoming, and
   pending announcements, with links into the rest of the admin area.
-- `/admin/crawler`: the most recent crawl run's stats, and a button to
-  trigger a new run on demand.
-- `/admin/review`: every `crawl_item` in the `new`, `updated`, or
-  `uncertain` state, with match confidence, so an admin can publish a
-  crawler-created or crawler-updated title, or decide whether to
-  publish, reject, or merge an uncertain one.
+- `/admin/crawler`: the most recent crawl run's stats and a per-source
+  breakdown, live: while a run is queued or running, the page polls
+  `GET /runs/{id}` every two seconds until it reaches a final status,
+  and a second crawl cannot be started while one is already in
+  progress.
+- `/admin/review`: every `crawl_item` in the `new`, `updated`,
+  `existing`, or `uncertain` state, with match confidence. Publish
+  makes a crawler-created or crawler-updated title visible (or, for an
+  `uncertain` item, creates and publishes a new title from it). Merge
+  (only shown for `uncertain` items) confirms it is the same title it
+  matched and applies its data. Reject marks it resolved without
+  touching any title.
 - `/admin/announcements`: every announcement, draft or published, with
-  publish and unpublish actions.
-- `/admin/sources`: the crawlable source allow list, with the last
-  crawl time and last error for each, so a failing source is visible
-  without digging through logs.
+  working publish and unpublish actions. There is no content editor
+  yet, drafts still need to be created directly or by a future
+  announcement source.
+- `/admin/sources`: every source, with the last crawl time and last
+  error, and working enable/disable and priority controls, so this
+  page actually controls which sources the crawler runs (previously it
+  only displayed them).
 
 ## Audit log
 
@@ -71,4 +81,10 @@ Row Level Security in `supabase/migrations/009_rls.sql` is the real
 boundary, not the admin checks in `RequireAdmin` or
 `crawler/worker.py`. Even if one of those checks had a bug, RLS still
 blocks a non admin from writing to `titles`, `sources`, or
-`announcements` directly.
+`announcements` directly. `crawl_items` and `admin_actions` go
+further: there is no RLS policy letting even an admin write to them
+from the browser, only read. That is not an oversight, it is why the
+review queue's publish, reject, and merge actions have to go through
+`crawler/worker.py` (which uses the service-role key) instead of a
+direct Supabase call the way `/admin/sources`' enable/disable toggle
+technically could have.

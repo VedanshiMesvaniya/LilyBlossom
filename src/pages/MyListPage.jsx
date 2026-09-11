@@ -8,7 +8,8 @@ const TABS = [
   { key: "plan_to_watch", label: "Plan to Watch" },
   { key: "watching", label: "Watching" },
   { key: "watched", label: "Watched" },
-  { key: "dropped", label: "Dropped" }
+  { key: "dropped", label: "Dropped" },
+  { key: "favorites", label: "Favorites" }
 ];
 
 export function MyListPage() {
@@ -24,42 +25,47 @@ export function MyListPage() {
     let isMounted = true;
     setLoading(true);
 
-    supabase
+    let query = supabase
       .from("user_media_status")
       .select(
-        "status, current_episode, progress, titles(canonical_slug, type, canonical_title, release_year, country, poster_url, release_status)"
+        "status, current_episode, progress, is_favorite, titles(canonical_slug, type, canonical_title, release_year, country, poster_url, release_status)"
       )
-      .eq("user_id", user.id)
-      .eq("status", activeTab)
-      .then(({ data, error: queryError }) => {
-        if (!isMounted) return;
-        if (queryError) {
-          setError(queryError.message);
-          setItems([]);
-          setLoading(false);
-          return;
-        }
-        setError(null);
-        const mapped = (data ?? [])
-          .map((row) => {
-            const t = row.titles;
-            if (!t) return null;
-            return {
-              slug: t.canonical_slug,
-              type: t.type,
-              title: t.canonical_title,
-              year: t.release_year,
-              country: t.country,
-              posterUrl: t.poster_url,
-              releaseStatus: t.release_status,
-              userStatus: row.status,
-              progressPercentage: row.progress
-            };
-          })
-          .filter(Boolean);
-        setItems(mapped);
+      .eq("user_id", user.id);
+
+    // Favorites is not a watch status, it is its own flag: it can show
+    // titles regardless of whether they are being watched, finished,
+    // or not started (schema: user_media_status.is_favorite).
+    query = activeTab === "favorites" ? query.eq("is_favorite", true) : query.eq("status", activeTab);
+
+    query.then(({ data, error: queryError }) => {
+      if (!isMounted) return;
+      if (queryError) {
+        setError(queryError.message);
+        setItems([]);
         setLoading(false);
-      });
+        return;
+      }
+      setError(null);
+      const mapped = (data ?? [])
+        .map((row) => {
+          const t = row.titles;
+          if (!t) return null;
+          return {
+            slug: t.canonical_slug,
+            type: t.type,
+            title: t.canonical_title,
+            year: t.release_year,
+            country: t.country,
+            posterUrl: t.poster_url,
+            releaseStatus: t.release_status,
+            userStatus: row.status,
+            progressPercentage: row.progress
+          };
+        })
+        .filter(Boolean);
+      setItems(mapped);
+      setLoading(false);
+    });
 
     return () => {
       isMounted = false;

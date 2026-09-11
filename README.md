@@ -62,6 +62,22 @@ architecture described above:
   one `crawl_runs` row from `queued` through to a final status, the
   admin crawler page can poll `GET /runs/{id}` for live progress, and
   a second crawl cannot be started while one is already in progress.
+- The admin area works end to end: `/admin/crawler` polls a run live
+  and shows a per-source breakdown, `/admin/sources` can actually
+  enable/disable a source and change its priority, and
+  `/admin/review` can publish, reject, or merge a review queue item,
+  all logged to `admin_actions`. See docs/ADMIN.md.
+- Catalog pages show real loading and error states instead of a blank
+  screen or a silently empty list, and Series, Movies, and
+  Announcements are paginated rather than loading the whole catalog at
+  once. There is a working search box (`/search`) across canonical and
+  original titles.
+- Personal tracking covers the full schema, not just watch status:
+  favoriting a title, setting watch progress (which auto-completes a
+  title at 100%, see `supabase/migrations/003_user_tracking.sql`), and
+  a `/profile` edit form for username, bio, favorite GL, and favorite
+  pairing, all previously present in the database but not reachable
+  from any page.
 - The crawler's three sources are GL Archive, AniList, and TMDB:
   - GL Archive (`crawler/sources/gl_archive.py`) scrapes the live
     catalog page directly. Its CSS selectors were checked against
@@ -72,6 +88,18 @@ architecture described above:
     return a temporary error or get rate limited; the crawler treats
     that as one source being unavailable for that run rather than a
     reason to fail the whole crawl, see `docs/CRAWLER.md`.
+- A `Dockerfile` builds the backend as described in
+  `docs/DEPLOYMENT.md`. The frontend is a static build deployed
+  separately; it has no Dockerfile of its own.
+- `npm audit` reports a moderate/high react-router advisory
+  (`GHSA-wrjc-x8rr-h8h6`, an open redirect via a backslash in
+  `<Link>`/`useNavigate`) that a major version bump would fix. Rather
+  than take that breaking change untested, `LoginPage.jsx`'s `?next=`
+  redirect target is validated directly
+  (`src/lib/sanitizeNextPath.js`), which closes the actual exploitable
+  path in this app regardless of the installed react-router version.
+  The remaining `npm audit` findings are dev-server-only (esbuild,
+  vitest's mocker) and do not affect the built frontend.
 - No Supabase project, TMDB key, or hosting has been provisioned yet.
   Nothing has been deployed. `docs/SETUP.md` walks through provisioning
   everything from scratch.
