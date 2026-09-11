@@ -36,24 +36,33 @@ step to run.
 
 ## Backend
 
-The backend (`crawler/worker.py`) doubles as the crawler runner, so it
-is plain Python, not a serverless function, since multi-source
-crawling, retries, and (if a future adapter needs it) Playwright do
-not fit comfortably inside a short lived function.
+The backend (`crawler/worker.py`) is a FastAPI app on Uvicorn, and
+doubles as the crawler runner, so it is plain Python, not a serverless
+function, since multi-source crawling, retries, and (if a future
+adapter needs it) Playwright do not fit comfortably inside a short
+lived function.
 
 1. Build a container from the repository root with
-   `crawler/requirements.txt` installed, plus
-   `playwright install --with-deps` only if a future adapter adds
-   Playwright as a dependency. No current adapter uses it.
-2. Run it with `python -m crawler.worker`. It listens on
-   `CRAWLER_WORKER_PORT` (default `8787`) and exposes `/health`,
-   `/run`, `/titles`, and `/announcements`, see `crawler/worker.py`'s
-   module docstring for what each does.
+   `crawler/requirements.txt` installed (this now includes `fastapi`
+   and `uvicorn`), plus `playwright install --with-deps` only if a
+   future adapter adds Playwright as a dependency. No current adapter
+   uses it.
+2. Run it with `uvicorn crawler.worker:app --host 0.0.0.0 --port $PORT`.
+   **Always use a single worker** (the default; do not pass
+   `--workers` with a value greater than 1). The crawl-in-progress lock
+   in `POST /run` and the background crawl task both only work within
+   one process; more than one worker process could start overlapping
+   crawls against the same database. It listens on `CRAWLER_WORKER_PORT`
+   (or `$PORT`, default `8787`) and exposes `/health`, `/run`,
+   `/runs/{run_id}`, `/titles`, and `/announcements`, see
+   `crawler/worker.py`'s module docstring for what each does.
 3. Deploy that container to Render, Railway, Fly.io, or a VM you
    control, with `VITE_SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
    `CRAWLER_SECRET`, and `TMDB_API_KEY` set as environment variables
-   there. Also set `FRONTEND_ORIGIN` to your deployed frontend's exact
-   URL, the default of `*` is only meant for local development.
+   there. Also set `ENVIRONMENT=production` and `FRONTEND_ORIGIN` to
+   your deployed frontend's exact URL: the backend refuses to start
+   with `ENVIRONMENT=production` and no real `FRONTEND_ORIGIN`, since
+   the default of `*` is only meant for local development.
 4. Confirm `python -m crawler.main --dry-run` succeeds against that
    deployment's environment before wiring the scheduler to it.
 

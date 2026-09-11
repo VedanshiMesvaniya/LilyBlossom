@@ -8,12 +8,14 @@ export function AnnouncementDetailPage() {
   const { slug } = useParams();
   const [announcement, setAnnouncement] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
-    getAnnouncementBySlug(supabase, slug).then((data) => {
+    getAnnouncementBySlug(supabase, slug).then(({ data, error: queryError }) => {
       if (isMounted) {
         setAnnouncement(data);
+        setError(queryError);
         setLoading(false);
       }
     });
@@ -22,7 +24,22 @@ export function AnnouncementDetailPage() {
     };
   }, [slug]);
 
-  if (loading) return null;
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-2xl animate-pulse px-4 py-10">
+        <div className="h-4 w-16 rounded bg-secondary/60" />
+        <div className="mt-3 h-8 w-3/4 rounded bg-secondary/60" />
+        <div className="mt-6 aspect-video rounded-card bg-secondary/60" />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <p className="mx-auto max-w-2xl px-4 py-10 text-center font-ui text-sm text-red-500">
+        Could not load this announcement: {error}
+      </p>
+    );
+  }
   if (!announcement) return <NotFoundPage />;
 
   return (

@@ -7,9 +7,9 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n web,api -c blue,magenta \"vite\" \"py -m crawler.worker\"",
+    "dev": "concurrently -n web,api -c blue,magenta \"vite\" \"py -m uvicorn crawler.worker:app --host 127.0.0.1 --port 8787 --reload\"",
     "dev:web": "vite",
-    "dev:api": "py -m crawler.worker",
+    "dev:api": "py -m uvicorn crawler.worker:app --host 127.0.0.1 --port 8787 --reload",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext js,jsx",
