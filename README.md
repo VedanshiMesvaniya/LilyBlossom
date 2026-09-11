@@ -88,6 +88,18 @@ architecture described above:
     return a temporary error or get rate limited; the crawler treats
     that as one source being unavailable for that run rather than a
     reason to fail the whole crawl, see `docs/CRAWLER.md`.
+- A `Dockerfile` builds the backend as described in
+  `docs/DEPLOYMENT.md`. The frontend is a static build deployed
+  separately; it has no Dockerfile of its own.
+- `npm audit` reports a moderate/high react-router advisory
+  (`GHSA-wrjc-x8rr-h8h6`, an open redirect via a backslash in
+  `<Link>`/`useNavigate`) that a major version bump would fix. Rather
+  than take that breaking change untested, `LoginPage.jsx`'s `?next=`
+  redirect target is validated directly
+  (`src/lib/sanitizeNextPath.js`), which closes the actual exploitable
+  path in this app regardless of the installed react-router version.
+  The remaining `npm audit` findings are dev-server-only (esbuild,
+  vitest's mocker) and do not affect the built frontend.
 - No Supabase project, TMDB key, or hosting has been provisioned yet.
   Nothing has been deployed. `docs/SETUP.md` walks through provisioning
   everything from scratch.
