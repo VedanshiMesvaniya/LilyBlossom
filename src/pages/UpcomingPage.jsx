@@ -5,11 +5,16 @@ import { getUpcoming } from "../lib/catalogQueries.js";
 
 export function UpcomingPage() {
   const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
-    getUpcoming(supabase).then((data) => {
-      if (isMounted) setItems(data);
+    getUpcoming(supabase).then(({ data, error: queryError }) => {
+      if (!isMounted) return;
+      setItems(data);
+      setError(queryError);
+      setLoading(false);
     });
     return () => {
       isMounted = false;
@@ -19,7 +24,7 @@ export function UpcomingPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
       <h1 className="mb-6 font-display text-3xl text-text-primary">Upcoming GL</h1>
-      <MediaGrid items={items} emptyLabel="No confirmed upcoming GL yet." />
+      <MediaGrid items={items} loading={loading} error={error} emptyLabel="No confirmed upcoming GL yet." />
     </div>
   );
 }

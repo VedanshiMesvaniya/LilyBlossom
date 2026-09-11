@@ -5,11 +5,16 @@ import { getAiring } from "../lib/catalogQueries.js";
 
 export function AiringPage() {
   const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
-    getAiring(supabase).then((data) => {
-      if (isMounted) setItems(data);
+    getAiring(supabase).then(({ data, error: queryError }) => {
+      if (!isMounted) return;
+      setItems(data);
+      setError(queryError);
+      setLoading(false);
     });
     return () => {
       isMounted = false;
@@ -19,7 +24,7 @@ export function AiringPage() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
       <h1 className="mb-6 font-display text-3xl text-text-primary">Currently Airing</h1>
-      <MediaGrid items={items} emptyLabel="Nothing airing right now." />
+      <MediaGrid items={items} loading={loading} error={error} emptyLabel="Nothing airing right now." />
     </div>
   );
 }

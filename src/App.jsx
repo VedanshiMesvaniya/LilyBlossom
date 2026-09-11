@@ -10,6 +10,7 @@ import { MoviesListPage } from "./pages/MoviesListPage.jsx";
 import { TitleDetailPage } from "./pages/TitleDetailPage.jsx";
 import { AnnouncementsPage } from "./pages/AnnouncementsPage.jsx";
 import { AnnouncementDetailPage } from "./pages/AnnouncementDetailPage.jsx";
+import { SearchPage } from "./pages/SearchPage.jsx";
 import { UpcomingPage } from "./pages/UpcomingPage.jsx";
 import { AiringPage } from "./pages/AiringPage.jsx";
 import { MyListPage } from "./pages/MyListPage.jsx";
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="/movies/:slug" element={<TitleDetailPage type="movie" />} />
           <Route path="/announcements" element={<AnnouncementsPage />} />
           <Route path="/announcements/:slug" element={<AnnouncementDetailPage />} />
+          <Route path="/search" element={<SearchPage />} />
           <Route path="/upcoming" element={<UpcomingPage />} />
           <Route path="/airing" element={<AiringPage />} />
           <Route path="/login" element={<LoginPage />} />

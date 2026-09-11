@@ -17,10 +17,12 @@ export function MyListPage() {
   const activeTab = searchParams.get("tab") ?? "watching";
   const [items, setItems] = useState([]);
   const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
     let isMounted = true;
+    setLoading(true);
 
     supabase
       .from("user_media_status")
@@ -34,6 +36,7 @@ export function MyListPage() {
         if (queryError) {
           setError(queryError.message);
           setItems([]);
+          setLoading(false);
           return;
         }
         setError(null);
@@ -55,6 +58,7 @@ export function MyListPage() {
           })
           .filter(Boolean);
         setItems(mapped);
+        setLoading(false);
       });
 
     return () => {
@@ -82,11 +86,12 @@ export function MyListPage() {
         ))}
       </div>
 
-      {error ? (
-        <p className="font-ui text-sm text-red-500">Could not load your list: {error}</p>
-      ) : (
-        <MediaGrid items={items} emptyLabel="Nothing here yet. Go add something to your list." />
-      )}
+      <MediaGrid
+        items={items}
+        loading={loading}
+        error={error}
+        emptyLabel="Nothing here yet. Go add something to your list."
+      />
     </div>
   );
 }
