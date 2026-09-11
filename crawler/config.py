@@ -27,6 +27,19 @@ CRAWLER_WORKER_PORT = int(os.environ.get("CRAWLER_WORKER_PORT", "8787"))
 # see crawler/worker.py.
 ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
 
+# Upper bound on how many pages of AniList's Yuri-tagged media
+# fetch() will request per run (crawler/sources/anilist.py). The
+# GraphQL query already asked for pageInfo.hasNextPage but never used
+# it, so only the first 50 results (by popularity) were ever fetched
+# regardless of how many actually exist.
+MAX_ANILIST_PAGES = int(os.environ.get("MAX_ANILIST_PAGES", "5"))
+
+# Upper bound on how many GL Archive catalog pages fetch() will follow
+# in one run (see crawler/sources/gl_archive.py). Bounded the same way
+# as MAX_TMDB_PAGES, in case the site's real pagination turns out to be
+# very deep or, through some markup quirk, cyclical.
+MAX_GL_ARCHIVE_PAGES = int(os.environ.get("MAX_GL_ARCHIVE_PAGES", "20"))
+
 # Upper bound on how many /discover pages crawler/sources/tmdb.py will
 # request per type (TV, movie) per run, so a very large GL result set
 # cannot make a single crawl run unbounded.
