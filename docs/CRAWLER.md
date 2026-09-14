@@ -150,14 +150,21 @@ only be created directly in the database.
 
 - `TMDBAdapter` is a source adapter, registered in `SOURCE_REGISTRY`.
   It discovers GL live-action titles through TMDB's `/discover/tv` and
-  `/discover/movie` endpoints filtered to GL specific keyword IDs
-  (lesbian romance, yuri, girls' love, GL), so it does not pull in
-  TMDB's general catalog. It pages through up to `MAX_TMDB_PAGES`
-  pages per endpoint (`crawler/config.py`, default 5), stopping early
-  once TMDB reports there are no more pages, rather than only ever
-  reading page 1. The current `GL_KEYWORD_IDS` have not been verified
-  against a live TMDB account; confirm they map to the intended GL/
-  Yuri classifications before relying on TMDB result counts.
+  `/discover/movie` endpoints filtered to GL specific keywords, so it
+  does not pull in TMDB's general catalog. It pages through up to
+  `MAX_TMDB_PAGES` pages per endpoint (`crawler/config.py`, default
+  5), stopping early once TMDB reports there are no more pages,
+  rather than only ever reading page 1. Keyword ids used to be
+  hardcoded here (`GL_KEYWORD_IDS`); checking that list against the
+  live TMDB site showed most of the ids did not match any real
+  keyword, TMDB's actual "yuri" keyword id is 214564 and "lesbian" is
+  264386, and "girls' love" / "gl" do not exist as TMDB keywords at
+  all. `TMDBAdapter` now looks the current id up by name
+  (`GL_KEYWORD_NAMES`) through TMDB's own `/search/keyword` endpoint
+  at the start of each run instead, so it never depends on a fixed id
+  staying correct. A name TMDB has no keyword for is skipped rather
+  than failing the run; if TMDB has no keyword for any of the
+  configured names, `fetch()` returns nothing for that run.
 - `TMDBEnricher` is a separate, optional enrichment step. Given a
   title a different adapter already found, it can fill in `poster_url`
   and `description` through TMDB's search endpoint. It never creates a
