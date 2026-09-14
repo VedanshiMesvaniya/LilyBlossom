@@ -64,19 +64,20 @@ sample data in `tests/crawler/` and passes.
 
 The three current sources are verified differently:
 
-- `crawler/sources/gl_archive.py` scrapes `glarchive.net`'s live
-  catalog page with CSS selectors. Its selectors were checked against
-  that site's real markup, but any GL Archive page redesign can break
-  them silently, so re-check them if the crawl report shows an
-  unexpected drop in items from this source. `fetch()` follows
-  pagination automatically, up to `MAX_GL_ARCHIVE_PAGES`
-  (`crawler/config.py`, default 20), by looking for a standard
-  `<link rel="next">` tag or an anchor labelled "Next" (or similar);
-  if the live site uses neither pattern, only page one is fetched,
-  the same as before this was added. This has not been checked
-  against the real site's pagination markup; confirm it by comparing
-  a dry run's GL Archive item count against the number of titles
-  visible on the live catalog page.
+- `crawler/sources/gl_archive.py` was written to scrape a
+  `glarchive.net` catalog page with CSS selectors, but a web search
+  for that domain turned up no indexed pages at all, and no evidence
+  such a catalog site exists. The only real "Girls Love Archive"
+  presence found is a social media account with a simple linktree
+  style page, not a database with listing and pagination pages like
+  this adapter assumes. So, unlike an earlier version of this
+  document claimed, the selectors were never actually checked against
+  a real, live page, there was no real page to check them against.
+  `supabase/migrations/015_disable_unverified_gl_archive_source.sql`
+  disables this source in the database until someone confirms a real,
+  reachable URL for it, or it gets replaced with a verified source.
+  The adapter code is left in place so it is ready to point at a real
+  URL once one is confirmed.
 - `crawler/sources/anilist.py` and `crawler/sources/tmdb.py` use
   official, documented JSON APIs (AniList's GraphQL API and the TMDB
   REST API), not scraping. There is no markup to keep in sync, but
@@ -88,9 +89,10 @@ The three current sources are verified differently:
 Before running the crawler against production:
 
 1. Run `python -m crawler.main --dry-run` and read the printed report.
-2. If GL Archive's item count looks low or zero, fetch the live
-   catalog page and check whether its HTML structure changed, then
-   update the selectors in `gl_archive.py`'s `parse()`.
+2. GL Archive is disabled by default (see above) since its site could
+   not be confirmed as real; only re-enable it in `/admin/sources`
+   once a real, reachable URL is confirmed and `parse()`'s selectors
+   are checked against that page's actual markup.
 3. Confirm `TMDB_API_KEY` is set if you want TMDB results; without it,
    `crawler/sources/tmdb.py` returns no items rather than raising.
 
