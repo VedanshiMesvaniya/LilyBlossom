@@ -178,6 +178,24 @@ TMDB's attribution requirements apply wherever TMDB sourced data or
 images are shown; add the required attribution to an About or Credits
 page before enabling this in production.
 
+## Poster storage
+
+Every source gives `poster_url` as a direct link into that source's
+own hosting. `crawler/poster_handler.py`'s `store_poster_for_title()`
+downloads that image, hashes its bytes, and uploads it into the
+`title-posters` Supabase Storage bucket instead of leaving the title
+hotlinking the source. A `poster_assets` row records the storage path,
+the original source URL, and the hash, so the same image is never
+uploaded twice for one title. `insert_new_title()` and
+`apply_update_to_title()` (`crawler/main.py`) both call this right
+after they know a title's id, and only overwrite `titles.poster_url`
+with the new storage URL if the upload actually succeeded; on any
+failure (unreachable image, missing bucket, a transient Supabase
+error) the title simply keeps the original source URL rather than
+losing its poster or failing the whole crawl. The `title-posters`
+bucket itself is not created by a migration, see `docs/SETUP.md` for
+the manual step.
+
 ## Scheduling
 
 Supabase Cron calls `supabase/functions/crawler-trigger` daily, which
