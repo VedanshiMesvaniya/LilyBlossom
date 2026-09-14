@@ -15,14 +15,24 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 
-# Common TMDB keyword IDs:
-# 9840: lesbian romance, 158718: yuri, 258284: girls' love, 261493: gl
-GL_KEYWORD_IDS = "9840|158718|258284|261493"
+# The old hardcoded list here (9840, 158718, 258284, 261493) was
+# checked against the live TMDB site and turned out to be wrong.
+# TMDB's real "yuri" keyword id is 214564 and "lesbian" is 264386,
+# and "girls' love" / "gl" do not exist as TMDB keywords at all, so
+# there is nothing correct to hardcode for them. TMDB keyword ids
+# also are not guaranteed to stay the same forever. So instead of
+# trusting a fixed id list, _resolve_keyword_ids() below looks the
+# current id up by name through TMDB's own /search/keyword endpoint
+# every time the adapter runs, and keeps it only for that one run.
+GL_KEYWORD_NAMES = ["yuri", "lesbian"]
 
 
 class TMDBAdapter(SourceAdapter):
     name = "TMDB"
     base_url = TMDB_BASE_URL
+
+    def __init__(self) -> None:
+        self._keyword_ids_cache: Optional[str] = None
 
     def _get_auth(self) -> tuple[dict[str, str], dict[str, str]]:
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
@@ -47,7 +57,29 @@ class TMDBAdapter(SourceAdapter):
         response.raise_for_status()
         return response.json()
 
-    def _fetch_all_pages(self, client: httpx.Client, endpoint: str, item_type: str) -> list[str]:
+    def _resolve_keyword_ids(self, client: httpx.Client) -> str:
+        """Looks up the current TMDB keyword id for each name in
+        GL_KEYWORD_NAMES through /search/keyword, and joins whatever
+        is found into the pipe separated form /discover expects. A
+        name TMDB has no keyword for is skipped instead of failing
+        the whole crawl. Cached for the life of one adapter instance
+        so a multi page crawl only does this lookup once."""
+        if self._keyword_ids_cache is not None:
+            return self._keyword_ids_cache
+
+        found_ids: list[str] = []
+        for keyword_name in GL_KEYWORD_NAMES:
+            data = self._fetch_endpoint(client, "/search/keyword", {"query": keyword_name})
+            results = data.get("results", [])
+            exact_match = next((r for r in results if r.get("name", "").lower() == keyword_name), None)
+            match = exact_match or (results[0] if results else None)
+            if match and match.get("id") is not None:
+                found_ids.append(str(match["id"]))
+
+        self._keyword_ids_cache = "|".join(found_ids)
+        return self._keyword_ids_cache
+
+    def _fetch_all_pages(self, client: httpx.Client, endpoint: str, item_type: str, keyword_ids: str) -> list[str]:
         """Pages through one /discover endpoint up to MAX_TMDB_PAGES,
         stopping early once TMDB reports there are no more pages left.
         Without this, only the first ~20 results were ever collected
@@ -60,7 +92,7 @@ class TMDBAdapter(SourceAdapter):
             data = self._fetch_endpoint(
                 client,
                 endpoint,
-                {"with_keywords": GL_KEYWORD_IDS, "sort_by": "popularity.desc", "page": page},
+                {"with_keywords": keyword_ids, "sort_by": "popularity.desc", "page": page},
             )
             data["_type"] = item_type
             payloads.append(json.dumps(data))
@@ -75,9 +107,15 @@ class TMDBAdapter(SourceAdapter):
             # If no API key is provided, return empty without raising
             return []
 
+        keyword_ids = self._resolve_keyword_ids(client)
+        if not keyword_ids:
+            # TMDB returned no matching keyword for any name we asked
+            # about, so there is nothing safe to discover against.
+            return []
+
         payloads = []
-        payloads.extend(self._fetch_all_pages(client, "/discover/tv", "Series"))
-        payloads.extend(self._fetch_all_pages(client, "/discover/movie", "Movie"))
+        payloads.extend(self._fetch_all_pages(client, "/discover/tv", "Series", keyword_ids))
+        payloads.extend(self._fetch_all_pages(client, "/discover/movie", "Movie", keyword_ids))
         return payloads
 
     def parse(self, raw_payload: str) -> list[dict[str, Any]]:

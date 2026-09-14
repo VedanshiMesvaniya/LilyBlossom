@@ -3,6 +3,13 @@
 GL Archive specifically catalogues Girls' Love (GL) and Yuri media across
 series and movies, including release states such as on-air, in-production,
 completed, upcoming, and announced (product spec section 18).
+
+A web search for glarchive.net found no indexed pages and no evidence
+this catalog site actually exists; the real "Girls Love Archive" brand
+found is a social media account with a simple linktree style page, not
+a scrapeable database. This source is disabled in the database (see
+supabase/migrations/015_disable_unverified_gl_archive_source.sql) until
+someone confirms a real, reachable URL. See docs/CRAWLER.md.
 """
 from typing import Any
 from urllib.parse import urljoin

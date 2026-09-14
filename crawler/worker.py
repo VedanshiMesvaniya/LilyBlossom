@@ -482,7 +482,7 @@ def merge_review_item(crawl_item_id: str, authorization: Optional[str] = Header(
 
     item = RawCrawlItem.model_validate(crawl_item["payload"])
     try:
-        changed = apply_update_to_title(admin, title_id, item, crawl_item["source_id"])
+        changed = apply_update_to_title(admin, title_id, item, crawl_item["source_id"], source_name=item.source_name)
     except LockedTitleError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
