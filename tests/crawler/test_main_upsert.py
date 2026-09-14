@@ -58,6 +58,25 @@ class FakeTable:
         return FakeQuery(self, "upsert", payload=payload)
 
 
+class FakePosterStorageBucket:
+    def __init__(self, uploads):
+        self.uploads = uploads
+
+    def upload(self, path, data, options):
+        self.uploads.append({"path": path, "data": data, "options": options})
+
+    def get_public_url(self, path):
+        return f"https://fake.supabase.co/storage/v1/object/public/title-posters/{path}"
+
+
+class FakePosterStorage:
+    def __init__(self, uploads):
+        self.uploads = uploads
+
+    def from_(self, _bucket):
+        return FakePosterStorageBucket(self.uploads)
+
+
 class FakeSupabase:
     """Enough of the Supabase client surface for one titles row, one
     crawl, and its title_sources / crawl_items / title_changes writes."""
@@ -67,6 +86,9 @@ class FakeSupabase:
         self.title_sources = []
         self.crawl_items = []
         self.title_changes = []
+        self.poster_assets = []
+        self.poster_uploads = []
+        self.storage = FakePosterStorage(self.poster_uploads)
         self._next_id = 1
 
     def table(self, name):
@@ -100,6 +122,13 @@ class FakeSupabase:
         if query.table.name == "title_changes" and query.op == "insert":
             self.title_changes.append(query.payload)
             return FakeResult([query.payload])
+        if query.table.name == "poster_assets":
+            if query.op == "select":
+                matched = [row for row in self.poster_assets if all(row.get(k) == v for k, v in query.filters.items())]
+                return FakeResult(matched)
+            if query.op == "insert":
+                self.poster_assets.append(query.payload)
+                return FakeResult([query.payload])
         raise AssertionError(f"Unhandled fake query: {query.table.name} {query.op} {query.filters}")
 
 
@@ -231,3 +260,58 @@ def test_slug_collision_gets_a_numeric_suffix():
 def test_build_title_fields_lowercases_type_for_the_db_check_constraint():
     fields = build_title_fields(make_item(type="Movie"))
     assert fields["type"] == "movie"
+
+
+def test_new_item_with_a_poster_gets_it_copied_into_storage(monkeypatch):
+    from crawler import poster_handler
+
+    class FakeImageResponse:
+        content = b"fake-poster-bytes"
+        headers = {"content-type": "image/jpeg"}
+
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(poster_handler.httpx, "get", lambda *a, **k: FakeImageResponse())
+
+    supabase = FakeSupabase()
+    _upsert_item(
+        item=make_item(poster_url="https://example.invalid/poster.jpg"),
+        source_name="GL Archive",
+        source_row={"id": "src-1"},
+        supabase=supabase,
+        candidates=[],
+        used_slugs=set(),
+        dry_run=False,
+        run_id="run-1",
+    )
+
+    [title] = supabase.titles.values()
+    assert title["poster_url"].startswith("https://fake.supabase.co/storage/v1/object/public/title-posters/")
+    assert len(supabase.poster_uploads) == 1
+    assert supabase.poster_assets[0]["source_url"] == "https://example.invalid/poster.jpg"
+
+
+def test_new_item_keeps_the_source_poster_url_when_storage_upload_fails(monkeypatch):
+    from crawler import poster_handler
+
+    def raise_fetch_error(*_a, **_k):
+        raise poster_handler.httpx.ConnectError("could not connect")
+
+    monkeypatch.setattr(poster_handler.httpx, "get", raise_fetch_error)
+
+    supabase = FakeSupabase()
+    _upsert_item(
+        item=make_item(poster_url="https://example.invalid/poster.jpg"),
+        source_name="GL Archive",
+        source_row={"id": "src-1"},
+        supabase=supabase,
+        candidates=[],
+        used_slugs=set(),
+        dry_run=False,
+        run_id="run-1",
+    )
+
+    [title] = supabase.titles.values()
+    assert title["poster_url"] == "https://example.invalid/poster.jpg"  # fell back to the source URL
+    assert supabase.poster_uploads == []

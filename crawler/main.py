@@ -43,6 +43,7 @@ from .config import SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL
 from .deduplicator import CandidateTitle, classify_match, find_best_match
 from .models import CrawlRunSummary, RawCrawlItem
 from .normalizer import normalize_title, slugify
+from .poster_handler import store_poster_for_title
 from .sources.base import SourceAdapter
 from .sources.gl_archive import GLArchiveAdapter
 from .sources.anilist import AniListAdapter
@@ -201,10 +202,30 @@ def insert_new_title(supabase: Client, item: RawCrawlItem, source_name: str, pub
     inserted = supabase.table("titles").insert(fields).execute().data
     if not inserted:
         raise RuntimeError("Insert into titles returned no row.")
-    return inserted[0]["id"]
+    title_id = inserted[0]["id"]
+
+    if item.poster_url:
+        # Copy the poster into Supabase Storage instead of leaving the
+        # title hotlinking the source directly. On any failure this
+        # returns None and the title just keeps the source's poster_url
+        # already written above, so one bad image never breaks the
+        # whole insert.
+        stored_poster_url = store_poster_for_title(
+            supabase, title_id, fields["canonical_slug"], str(item.poster_url), source_name
+        )
+        if stored_poster_url:
+            supabase.table("titles").update({"poster_url": stored_poster_url}).eq("id", title_id).execute()
+
+    return title_id
 
 
-def apply_update_to_title(supabase: Client, title_id: str, item: RawCrawlItem, source_id: str | None) -> bool:
+def apply_update_to_title(
+    supabase: Client,
+    title_id: str,
+    item: RawCrawlItem,
+    source_id: str | None,
+    source_name: str | None = None,
+) -> bool:
     """Compares `item` against the existing titles row and writes any
     real changes, logging each to title_changes. Returns whether
     anything actually changed. Raises LockedTitleError instead of
@@ -221,6 +242,19 @@ def apply_update_to_title(supabase: Client, title_id: str, item: RawCrawlItem, s
         return False
 
     update_fields = {change.field: change.new_value for change in changes}
+
+    poster_change = next((change for change in changes if change.field == "poster_url"), None)
+    if poster_change and poster_change.new_value:
+        # Same idea as insert_new_title: copy the new poster into
+        # Storage rather than writing the raw source URL. Falls back
+        # to the source URL already in update_fields on failure.
+        title_slug = existing_row.get("canonical_slug") or title_id
+        stored_poster_url = store_poster_for_title(
+            supabase, title_id, title_slug, str(poster_change.new_value), source_name
+        )
+        if stored_poster_url:
+            update_fields["poster_url"] = stored_poster_url
+
     update_fields["updated_at"] = _now_iso()
     supabase.table("titles").update(update_fields).eq("id", title_id).execute()
     for change in changes:
@@ -292,7 +326,9 @@ def _upsert_item(
         title_id = best_candidate.id
         if write:
             try:
-                if apply_update_to_title(supabase, title_id, item, source_row["id"] if source_row else None):
+                if apply_update_to_title(
+                    supabase, title_id, item, source_row["id"] if source_row else None, source_name=source_name
+                ):
                     crawl_state = "updated"
             except LockedTitleError:
                 pass  # is_locked: seen again by the crawler, fields never touched.

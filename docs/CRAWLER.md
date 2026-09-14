@@ -64,19 +64,20 @@ sample data in `tests/crawler/` and passes.
 
 The three current sources are verified differently:
 
-- `crawler/sources/gl_archive.py` scrapes `glarchive.net`'s live
-  catalog page with CSS selectors. Its selectors were checked against
-  that site's real markup, but any GL Archive page redesign can break
-  them silently, so re-check them if the crawl report shows an
-  unexpected drop in items from this source. `fetch()` follows
-  pagination automatically, up to `MAX_GL_ARCHIVE_PAGES`
-  (`crawler/config.py`, default 20), by looking for a standard
-  `<link rel="next">` tag or an anchor labelled "Next" (or similar);
-  if the live site uses neither pattern, only page one is fetched,
-  the same as before this was added. This has not been checked
-  against the real site's pagination markup; confirm it by comparing
-  a dry run's GL Archive item count against the number of titles
-  visible on the live catalog page.
+- `crawler/sources/gl_archive.py` was written to scrape a
+  `glarchive.net` catalog page with CSS selectors, but a web search
+  for that domain turned up no indexed pages at all, and no evidence
+  such a catalog site exists. The only real "Girls Love Archive"
+  presence found is a social media account with a simple linktree
+  style page, not a database with listing and pagination pages like
+  this adapter assumes. So, unlike an earlier version of this
+  document claimed, the selectors were never actually checked against
+  a real, live page, there was no real page to check them against.
+  `supabase/migrations/015_disable_unverified_gl_archive_source.sql`
+  disables this source in the database until someone confirms a real,
+  reachable URL for it, or it gets replaced with a verified source.
+  The adapter code is left in place so it is ready to point at a real
+  URL once one is confirmed.
 - `crawler/sources/anilist.py` and `crawler/sources/tmdb.py` use
   official, documented JSON APIs (AniList's GraphQL API and the TMDB
   REST API), not scraping. There is no markup to keep in sync, but
@@ -88,9 +89,10 @@ The three current sources are verified differently:
 Before running the crawler against production:
 
 1. Run `python -m crawler.main --dry-run` and read the printed report.
-2. If GL Archive's item count looks low or zero, fetch the live
-   catalog page and check whether its HTML structure changed, then
-   update the selectors in `gl_archive.py`'s `parse()`.
+2. GL Archive is disabled by default (see above) since its site could
+   not be confirmed as real; only re-enable it in `/admin/sources`
+   once a real, reachable URL is confirmed and `parse()`'s selectors
+   are checked against that page's actual markup.
 3. Confirm `TMDB_API_KEY` is set if you want TMDB results; without it,
    `crawler/sources/tmdb.py` returns no items rather than raising.
 
@@ -150,14 +152,21 @@ only be created directly in the database.
 
 - `TMDBAdapter` is a source adapter, registered in `SOURCE_REGISTRY`.
   It discovers GL live-action titles through TMDB's `/discover/tv` and
-  `/discover/movie` endpoints filtered to GL specific keyword IDs
-  (lesbian romance, yuri, girls' love, GL), so it does not pull in
-  TMDB's general catalog. It pages through up to `MAX_TMDB_PAGES`
-  pages per endpoint (`crawler/config.py`, default 5), stopping early
-  once TMDB reports there are no more pages, rather than only ever
-  reading page 1. The current `GL_KEYWORD_IDS` have not been verified
-  against a live TMDB account; confirm they map to the intended GL/
-  Yuri classifications before relying on TMDB result counts.
+  `/discover/movie` endpoints filtered to GL specific keywords, so it
+  does not pull in TMDB's general catalog. It pages through up to
+  `MAX_TMDB_PAGES` pages per endpoint (`crawler/config.py`, default
+  5), stopping early once TMDB reports there are no more pages,
+  rather than only ever reading page 1. Keyword ids used to be
+  hardcoded here (`GL_KEYWORD_IDS`); checking that list against the
+  live TMDB site showed most of the ids did not match any real
+  keyword, TMDB's actual "yuri" keyword id is 214564 and "lesbian" is
+  264386, and "girls' love" / "gl" do not exist as TMDB keywords at
+  all. `TMDBAdapter` now looks the current id up by name
+  (`GL_KEYWORD_NAMES`) through TMDB's own `/search/keyword` endpoint
+  at the start of each run instead, so it never depends on a fixed id
+  staying correct. A name TMDB has no keyword for is skipped rather
+  than failing the run; if TMDB has no keyword for any of the
+  configured names, `fetch()` returns nothing for that run.
 - `TMDBEnricher` is a separate, optional enrichment step. Given a
   title a different adapter already found, it can fill in `poster_url`
   and `description` through TMDB's search endpoint. It never creates a
@@ -168,6 +177,24 @@ no items rather than raising, and `TMDBEnricher` is simply not used.
 TMDB's attribution requirements apply wherever TMDB sourced data or
 images are shown; add the required attribution to an About or Credits
 page before enabling this in production.
+
+## Poster storage
+
+Every source gives `poster_url` as a direct link into that source's
+own hosting. `crawler/poster_handler.py`'s `store_poster_for_title()`
+downloads that image, hashes its bytes, and uploads it into the
+`title-posters` Supabase Storage bucket instead of leaving the title
+hotlinking the source. A `poster_assets` row records the storage path,
+the original source URL, and the hash, so the same image is never
+uploaded twice for one title. `insert_new_title()` and
+`apply_update_to_title()` (`crawler/main.py`) both call this right
+after they know a title's id, and only overwrite `titles.poster_url`
+with the new storage URL if the upload actually succeeded; on any
+failure (unreachable image, missing bucket, a transient Supabase
+error) the title simply keeps the original source URL rather than
+losing its poster or failing the whole crawl. The `title-posters`
+bucket itself is not created by a migration, see `docs/SETUP.md` for
+the manual step.
 
 ## Scheduling
 
