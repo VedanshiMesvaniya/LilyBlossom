@@ -213,6 +213,77 @@ def test_merge_applies_changes_and_refuses_locked_titles():
     assert response2.status_code == 400
 
 
+def test_publish_uncertain_item_applies_admin_corrections_before_creating_the_title():
+    fake, client = make_client(
+        {
+            "crawl_items": [
+                {
+                    "id": "ci-6",
+                    "state": "uncertain",
+                    "matched_title_id": "title-6",
+                    "source_id": "src-1",
+                    "payload": UNCERTAIN_PAYLOAD,
+                }
+            ],
+            "titles": [{"id": "title-6", "canonical_title": "Something Else", "is_locked": False}],
+        }
+    )
+
+    response = client.post(
+        "/review/ci-6/publish",
+        json={"title": "The Corrected Title", "year": 2026},
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    new_title = response.json()["title"]
+    assert new_title["canonical_title"] == "The Corrected Title"
+    assert new_title["release_year"] == 2026
+
+
+def test_publish_existing_title_applies_admin_corrections():
+    fake, client = make_client(
+        {
+            "crawl_items": [
+                {"id": "ci-7", "state": "new", "matched_title_id": "title-7", "source_id": "src-1", "payload": UNCERTAIN_PAYLOAD}
+            ],
+            "titles": [{"id": "title-7", "canonical_title": "Already Created By Crawler", "is_published": False}],
+        }
+    )
+
+    response = client.post(
+        "/review/ci-7/publish",
+        json={"description": "A corrected description.", "status": "Airing"},
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert fake.rows["titles"]["title-7"]["is_published"] is True
+    assert fake.rows["titles"]["title-7"]["description"] == "A corrected description."
+    assert fake.rows["titles"]["title-7"]["release_status"] == "Airing"
+
+
+def test_merge_ignores_fields_outside_the_override_allow_list():
+    fake, client = make_client(
+        {
+            "crawl_items": [
+                {"id": "ci-8", "state": "uncertain", "matched_title_id": "title-8", "source_id": "src-1", "payload": UNCERTAIN_PAYLOAD}
+            ],
+            "titles": [{"id": "title-8", "canonical_title": "A Brand New Show", "is_locked": False, "tmdb_id": "keep-me"}],
+        }
+    )
+
+    response = client.post(
+        "/review/ci-8/merge",
+        json={"title": "Fixed Title", "tmdb_id": "should-be-ignored"},
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert fake.rows["titles"]["title-8"]["canonical_title"] == "Fixed Title"
+    assert fake.rows["titles"]["title-8"]["tmdb_id"] == "keep-me"  # not in ALLOWED_REVIEW_OVERRIDE_FIELDS
+
+
 def test_patch_sources_only_allows_enabled_and_priority():
     fake, client = make_client(
         {"sources": [{"id": "src-1", "name": "GL Archive", "url": "https://glarchive.net", "enabled": True, "priority": 10}]}
@@ -225,3 +296,93 @@ def test_patch_sources_only_allows_enabled_and_priority():
     assert response.status_code == 200
     assert fake.rows["sources"]["src-1"]["enabled"] is False
     assert fake.rows["sources"]["src-1"]["url"] == "https://glarchive.net"  # url is not in the allow-list
+
+
+def test_create_announcement_requires_the_core_fields():
+    _fake, client = make_client({"announcements": []})
+
+    response = client.post(
+        "/announcements",
+        json={"title": "New trailer dropped"},
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_create_announcement_generates_a_unique_slug_and_defaults_to_draft():
+    fake, client = make_client(
+        {"announcements": [{"id": "existing-1", "title": "Old", "slug": "new-trailer-dropped", "status": "published"}]}
+    )
+
+    response = client.post(
+        "/announcements",
+        json={
+            "title": "New trailer dropped",
+            "summary": "A short summary.",
+            "content": "The full announcement body.",
+            "announcement_type": "Trailer",
+        },
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    created = response.json()["announcement"]
+    assert created["status"] == "draft"
+    assert created["slug"] == "new-trailer-dropped-2"  # base slug was already taken
+    assert fake.inserted["admin_actions"][0]["action"] == "create"
+
+
+def test_create_announcement_rejects_an_unknown_announcement_type():
+    _fake, client = make_client({"announcements": []})
+
+    response = client.post(
+        "/announcements",
+        json={
+            "title": "New trailer dropped",
+            "summary": "A short summary.",
+            "content": "The full announcement body.",
+            "announcement_type": "Not A Real Type",
+        },
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_patch_announcement_edits_content_fields_without_changing_status():
+    fake, client = make_client(
+        {
+            "announcements": [
+                {"id": "ann-1", "title": "Old title", "summary": "Old summary", "status": "draft"}
+            ]
+        }
+    )
+
+    response = client.patch(
+        "/announcements",
+        json={"id": "ann-1", "title": "Corrected title"},
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert fake.rows["announcements"]["ann-1"]["title"] == "Corrected title"
+    assert fake.rows["announcements"]["ann-1"]["status"] == "draft"  # untouched
+    assert fake.inserted["admin_actions"][0]["action"] == "edit"
+
+
+def test_patch_announcement_can_edit_content_and_publish_in_one_call():
+    fake, client = make_client(
+        {"announcements": [{"id": "ann-2", "title": "Old title", "status": "draft"}]}
+    )
+
+    response = client.patch(
+        "/announcements",
+        json={"id": "ann-2", "title": "Corrected title", "status": "published"},
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert fake.rows["announcements"]["ann-2"]["title"] == "Corrected title"
+    assert fake.rows["announcements"]["ann-2"]["status"] == "published"
+    assert fake.inserted["admin_actions"][0]["action"] == "publish"

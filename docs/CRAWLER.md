@@ -137,14 +137,16 @@ can be temporarily unavailable or rate limited; when that happens the
 crawler reports this source as `unavailable` for that run and
 continues with the other sources.
 
-## Announcements do not have a source yet
+## Announcements do not have a crawler source yet
 
-There is an `announcements` table and an `/admin/announcements` page
-(publish/unpublish only, see `docs/ADMIN.md`), but no crawler adapter
-writes to it. This needs a product decision, not just code: which
-site(s) count as a legitimate, scrapeable or API-backed source for GL
-news/announcements. Until that is decided, announcement drafts can
-only be created directly in the database.
+There is an `announcements` table and an `/admin/announcements` page.
+An admin can now write, edit, publish, and unpublish an announcement
+directly from that page (`POST` and `PATCH /announcements` in
+`crawler/worker.py`), but no crawler adapter writes to it
+automatically yet. Adding one needs a product decision, not just
+code: which site(s) count as a legitimate, scrapeable or API-backed
+source for GL news/announcements. Until that is decided, every
+announcement is admin authored.
 
 ## TMDB
 
