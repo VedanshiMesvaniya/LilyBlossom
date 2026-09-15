@@ -135,7 +135,42 @@ Archive. It needs no API key. It pages through up to
 only ever reading the first 50 results by popularity. AniList's API
 can be temporarily unavailable or rate limited; when that happens the
 crawler reports this source as `unavailable` for that run and
-continues with the other sources.
+continues with the other sources. The `Yuri` tag was checked against
+AniList's live site before this doc was written; it is a real tag,
+not a guess.
+
+## MyAnimeList (via Jikan)
+
+`crawler/sources/jikan.py` is a source adapter, registered in
+`SOURCE_REGISTRY`, added to cover GL/Yuri series and movies from any
+country of origin MAL catalogs (Japanese, Chinese donghua, Korean,
+etc.), not only Japan. It uses `api.jikan.moe`, a free, keyless,
+open source REST API that mirrors MyAnimeList's public pages. Checked
+before adding: it is real, currently working, needs no API key or
+signup, is MIT licensed, and publishes an explicit rate limit (60
+requests/minute, 3/second).
+
+MAL renamed its `Yuri` genre to `Girls Love` in 2022. Like the TMDB
+keyword fix above, this adapter does not hardcode that genre's
+numeric id; `_resolve_genre_id()` looks it up by name (checking both
+`Girls Love` and `Yuri`) through `/genres/anime` at the start of each
+run and caches it, so a renamed or renumbered genre does not silently
+break the source. It pages through up to `MAX_JIKAN_PAGES`
+(`crawler/config.py`, default 10) using `pagination.has_next_page`,
+and sleeps `REQUEST_DELAY_SECONDS` between pages, since Jikan is a
+free, shared service and its rate limit is real. This is the first
+adapter to actually use `REQUEST_DELAY_SECONDS`; it existed in
+`crawler/config.py` before this but nothing called it.
+
+One current limitation: unlike TMDB/AniList/IMDb, there is no
+`mal_id` column on `titles` yet, so a MAL match cannot be confirmed by
+shared external id the way `crawler/deduplicator.py` does for those
+three. Matching still works through the normal fuzzy title+year
+fallback (the same path any two different sources already go through
+today, since none of the existing sources share an id namespace with
+each other either), just without the extra id based shortcut. Adding
+a `mal_id` column and wiring it into the deduplicator would be a
+reasonable, small follow up if this source turns out to need it.
 
 ## Announcements do not have a crawler source yet
 

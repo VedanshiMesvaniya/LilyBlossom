@@ -47,6 +47,7 @@ from .poster_handler import store_poster_for_title
 from .sources.base import SourceAdapter
 from .sources.gl_archive import GLArchiveAdapter
 from .sources.anilist import AniListAdapter
+from .sources.jikan import MyAnimeListAdapter
 from .sources.tmdb import TMDBAdapter
 
 # Registering a new source here is still step one for a new adapter
@@ -58,6 +59,7 @@ from .sources.tmdb import TMDBAdapter
 SOURCE_REGISTRY: list[type[SourceAdapter]] = [
     GLArchiveAdapter,
     AniListAdapter,
+    MyAnimeListAdapter,
     TMDBAdapter,
 ]
 

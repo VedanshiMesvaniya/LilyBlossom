@@ -11,6 +11,8 @@ your own Supabase project, your own TMDB key, and your own secrets.
 - A Supabase account (the free tier is enough to start)
 - Optional for now, needed before enabling poster enrichment: a TMDB
   API key from https://www.themoviedb.org/settings/api
+- Nothing extra needed for MyAnimeList: `crawler/sources/jikan.py`
+  uses the free, keyless Jikan API as soon as the crawler runs.
 
 ## 2. Create the Supabase project
 
