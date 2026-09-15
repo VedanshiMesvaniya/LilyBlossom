@@ -83,10 +83,14 @@ architecture described above:
   markup to keep in sync, and can each return a temporary error or get
   rate limited; the crawler treats that as one source being
   unavailable for that run rather than a reason to fail the whole
-  crawl. GL Archive (`crawler/sources/gl_archive.py`) is currently
-  disabled: its target site could not be confirmed as a real,
-  reachable catalog. See `docs/CRAWLER.md` for what each source
-  actually covers and how it was verified.
+  crawl. Two sources are currently disabled by default, each for a
+  different reason: GL Archive (`crawler/sources/gl_archive.py`)
+  because its target site could not be confirmed as a real, reachable
+  catalog, and MyAnimeList (`crawler/sources/jikan.py`) because using
+  its free API to populate another database appears to breach
+  MyAnimeList's own Terms of Service, a decision someone needs to
+  make before turning it on. See `docs/CRAWLER.md` for what each
+  source actually covers and how it was verified.
 - A `Dockerfile` builds the backend as described in
   `docs/DEPLOYMENT.md`. The frontend is a static build deployed
   separately; it has no Dockerfile of its own.

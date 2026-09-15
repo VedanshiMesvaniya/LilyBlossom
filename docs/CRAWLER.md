@@ -150,6 +150,19 @@ before adding: it is real, currently working, needs no API key or
 signup, is MIT licensed, and publishes an explicit rate limit (60
 requests/minute, 3/second).
 
+**This source is disabled by default and needs a decision before
+turning it on.** After adding it, further checking (not done before
+the first pass, a real gap in that check) turned up this, stated
+plainly on Jikan's own GitHub repos and API listings: using the API
+"for the sake of populating data/making your own database" breaches
+MyAnimeList's Terms of Service. That is exactly what this crawler
+does. The API being real and working (which it is) is a different
+question from whether this specific use of it is allowed, and that
+second question is a policy call for a person to make, not something
+to decide by writing the adapter and leaving it on.
+`supabase/migrations/017_disable_myanimelist_pending_tos_decision.sql`
+disables it until that decision is made.
+
 MAL renamed its `Yuri` genre to `Girls Love` in 2022. Like the TMDB
 keyword fix above, this adapter does not hardcode that genre's
 numeric id; `_resolve_genre_id()` looks it up by name (checking both

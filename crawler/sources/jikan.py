@@ -5,10 +5,18 @@ Covers GL/Yuri anime series and movies from any country of origin MAL
 catalogs (Japanese, Chinese donghua, Korean, etc.), not just Japan,
 since MAL's own genre tagging is not country specific.
 
-Verified before writing this: api.jikan.moe is a real, currently
-working, free API (no key, no signup), MIT licensed, with a published
-rate limit (60 requests/minute, 3/second) rather than an unpublished
-one that could get this project silently blocked. See docs/CRAWLER.md.
+Verified with live requests before writing this: api.jikan.moe is a
+real, currently working, free API (no key, no signup), MIT licensed,
+with a published rate limit (60 requests/minute, 3/second).
+
+Found after adding this, and not caught in the first check: Jikan's
+own project pages (its GitHub repos and API listings) state that
+using the API "for the sake of populating data/making your own
+database" breaches MyAnimeList's Terms of Service, which is exactly
+what this adapter does. This source is disabled by default in the
+database (supabase/migrations/017_disable_myanimelist_pending_tos_decision.sql)
+until someone decides whether that risk is acceptable. See
+docs/CRAWLER.md.
 """
 import json
 import time
