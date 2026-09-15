@@ -11,6 +11,8 @@ your own Supabase project, your own TMDB key, and your own secrets.
 - A Supabase account (the free tier is enough to start)
 - Optional for now, needed before enabling poster enrichment: a TMDB
   API key from https://www.themoviedb.org/settings/api
+- Nothing extra needed for MyAnimeList: `crawler/sources/jikan.py`
+  uses the free, keyless Jikan API as soon as the crawler runs.
 
 ## 2. Create the Supabase project
 
@@ -21,7 +23,8 @@ your own Supabase project, your own TMDB key, and your own secrets.
    variable, Vite exposes every `VITE_` prefixed variable to the
    browser bundle.
 3. In the SQL editor, run every file in `supabase/migrations/` in
-   order, `001` through `009`. Each file is idempotent where practical,
+   numeric order, from the lowest number through the highest one
+   currently in that folder. Each file is idempotent where practical,
    but running them out of order will fail on missing tables.
 4. Create three storage buckets: `title-posters`, `title-backdrops`,
    and `avatars`, plus `announcement-images`. Mark them public if you

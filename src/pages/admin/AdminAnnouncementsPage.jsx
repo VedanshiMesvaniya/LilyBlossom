@@ -2,9 +2,123 @@ import { useEffect, useState } from "react";
 import { supabase } from "../../lib/supabaseClient.js";
 import { adminFetch } from "../../lib/adminApi.js";
 
-function AnnouncementRow({ item, onChanged }) {
+const ANNOUNCEMENT_TYPES = [
+  "New Release",
+  "Release Date",
+  "Trailer",
+  "Casting",
+  "Production",
+  "Streaming",
+  "Poster",
+  "Status Update",
+  "Other GL"
+];
+
+function AnnouncementForm({ initial, busy, submitLabel, onCancel, onSubmit }) {
+  const [fields, setFields] = useState({
+    title: initial?.title ?? "",
+    announcement_type: initial?.announcement_type ?? ANNOUNCEMENT_TYPES[0],
+    summary: initial?.summary ?? "",
+    content: initial?.content ?? "",
+    cover_image: initial?.cover_image ?? ""
+  });
+
+  function update(key, value) {
+    setFields((current) => ({ ...current, [key]: value }));
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    onSubmit({
+      title: fields.title.trim(),
+      announcement_type: fields.announcement_type,
+      summary: fields.summary.trim(),
+      content: fields.content.trim(),
+      cover_image: fields.cover_image.trim() || undefined
+    });
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3 text-sm">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="flex flex-col gap-1 sm:col-span-2">
+          <span className="text-xs text-text-muted">Title</span>
+          <input
+            value={fields.title}
+            onChange={(event) => update("title", event.target.value)}
+            className="rounded-md border border-border bg-surface px-2 py-1"
+            required
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-text-muted">Type</span>
+          <select
+            value={fields.announcement_type}
+            onChange={(event) => update("announcement_type", event.target.value)}
+            className="rounded-md border border-border bg-surface px-2 py-1"
+          >
+            {ANNOUNCEMENT_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs text-text-muted">Cover image URL</span>
+          <input
+            value={fields.cover_image}
+            onChange={(event) => update("cover_image", event.target.value)}
+            className="rounded-md border border-border bg-surface px-2 py-1"
+            placeholder="https://..."
+          />
+        </label>
+        <label className="flex flex-col gap-1 sm:col-span-2">
+          <span className="text-xs text-text-muted">Summary</span>
+          <textarea
+            value={fields.summary}
+            onChange={(event) => update("summary", event.target.value)}
+            rows={2}
+            className="rounded-md border border-border bg-surface px-2 py-1"
+            required
+          />
+        </label>
+        <label className="flex flex-col gap-1 sm:col-span-2">
+          <span className="text-xs text-text-muted">Content</span>
+          <textarea
+            value={fields.content}
+            onChange={(event) => update("content", event.target.value)}
+            rows={6}
+            className="rounded-md border border-border bg-surface px-2 py-1"
+            required
+          />
+        </label>
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={busy}
+          className="rounded-full bg-primary px-3 py-1 text-white hover:opacity-90 disabled:opacity-60"
+        >
+          {busy ? "Saving..." : submitLabel}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={busy}
+          className="rounded-full border border-border px-3 py-1 hover:border-primary disabled:opacity-60"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function AnnouncementRow({ item, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [editing, setEditing] = useState(false);
   const nextStatus = item.status === "published" ? "unpublished" : "published";
 
   async function toggleStatus() {
@@ -23,24 +137,96 @@ function AnnouncementRow({ item, onChanged }) {
     }
   }
 
+  async function saveEdit(fields) {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await adminFetch("/announcements", {
+        method: "PATCH",
+        body: JSON.stringify({ id: item.id, ...fields })
+      });
+      onChanged(result.announcement);
+      setEditing(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <div className="flex items-center justify-between rounded-card border border-border bg-surface p-4">
-      <div>
-        <p className="text-text-primary">{item.title}</p>
-        <p className="text-xs text-text-muted">
-          {item.announcement_type} · {item.status}
-        </p>
-        {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    <div className="rounded-card border border-border bg-surface p-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-text-primary">{item.title}</p>
+          <p className="text-xs text-text-muted">
+            {item.announcement_type} · {item.status}
+          </p>
+        </div>
+        <div className="flex gap-2 text-sm">
+          <button
+            onClick={() => setEditing((current) => !current)}
+            disabled={busy}
+            className="rounded-full border border-border px-3 py-1 hover:border-primary disabled:opacity-60"
+          >
+            {editing ? "Close" : "Edit"}
+          </button>
+          <button
+            onClick={toggleStatus}
+            disabled={busy}
+            className="rounded-full border border-border px-3 py-1 hover:border-primary disabled:opacity-60"
+          >
+            {busy ? "Saving..." : item.status === "published" ? "Unpublish" : "Publish"}
+          </button>
+        </div>
       </div>
-      <div className="flex gap-2 text-sm">
-        <button
-          onClick={toggleStatus}
-          disabled={busy}
-          className="rounded-full border border-border px-3 py-1 hover:border-primary disabled:opacity-60"
-        >
-          {busy ? "Saving..." : item.status === "published" ? "Unpublish" : "Publish"}
-        </button>
-      </div>
+      {editing && (
+        <div className="mt-3 border-t border-border pt-3">
+          <AnnouncementForm initial={item} busy={busy} submitLabel="Save changes" onCancel={() => setEditing(false)} onSubmit={saveEdit} />
+        </div>
+      )}
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+function NewAnnouncementCard({ onCreated }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function create(fields) {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await adminFetch("/announcements", {
+        method: "POST",
+        body: JSON.stringify(fields)
+      });
+      onCreated(result.announcement);
+      setOpen(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="rounded-full border border-primary px-4 py-2 text-sm text-primary hover:opacity-90"
+      >
+        New announcement
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-card border border-border bg-surface p-4">
+      <AnnouncementForm busy={busy} submitLabel="Create draft" onCancel={() => setOpen(false)} onSubmit={create} />
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
     </div>
   );
 }
@@ -54,7 +240,7 @@ export function AdminAnnouncementsPage() {
     let isMounted = true;
     supabase
       .from("announcements")
-      .select("id, title, announcement_type, status, created_at")
+      .select("id, title, summary, content, cover_image, announcement_type, status, created_at")
       .order("created_at", { ascending: false })
       .then(({ data, error: queryError }) => {
         if (!isMounted) return;
@@ -72,13 +258,21 @@ export function AdminAnnouncementsPage() {
     setItems((current) => current.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
   }
 
+  function addCreated(created) {
+    if (!created) return;
+    setItems((current) => [created, ...current]);
+  }
+
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 font-ui">
       <h1 className="mb-2 font-display text-3xl text-text-primary">Announcements</h1>
       <p className="mb-6 text-sm text-text-muted">
-        There is no announcement content editor yet, drafts are created directly in the database or by a future
-        announcement source. This page publishes or unpublishes what already exists.
+        Write a new announcement draft, edit an existing one, or publish/unpublish it.
       </p>
+
+      <div className="mb-6">
+        <NewAnnouncementCard onCreated={addCreated} />
+      </div>
 
       {loading ? (
         <div className="space-y-3">

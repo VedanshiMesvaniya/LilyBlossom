@@ -45,6 +45,12 @@ MAX_GL_ARCHIVE_PAGES = int(os.environ.get("MAX_GL_ARCHIVE_PAGES", "20"))
 # cannot make a single crawl run unbounded.
 MAX_TMDB_PAGES = int(os.environ.get("MAX_TMDB_PAGES", "5"))
 
+# Upper bound on how many /anime pages crawler/sources/jikan.py will
+# request per run. Jikan (api.jikan.moe) is a free, keyless, community
+# run API; this exists for the same reason as the other MAX_*_PAGES
+# constants, not because Jikan itself paginates unusually deep.
+MAX_JIKAN_PAGES = int(os.environ.get("MAX_JIKAN_PAGES", "10"))
+
 CURRENT_YEAR = date.today().year
 
 REQUEST_TIMEOUT_SECONDS = 20

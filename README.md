@@ -78,16 +78,15 @@ architecture described above:
   a `/profile` edit form for username, bio, favorite GL, and favorite
   pairing, all previously present in the database but not reachable
   from any page.
-- The crawler's three sources are GL Archive, AniList, and TMDB:
-  - GL Archive (`crawler/sources/gl_archive.py`) scrapes the live
-    catalog page directly. Its CSS selectors were checked against
-    that site's real markup.
-  - AniList and TMDB (`crawler/sources/anilist.py`,
-    `crawler/sources/tmdb.py`) use official, documented JSON APIs, not
-    scraping, so there is no markup to keep in sync. AniList can
-    return a temporary error or get rate limited; the crawler treats
-    that as one source being unavailable for that run rather than a
-    reason to fail the whole crawl, see `docs/CRAWLER.md`.
+- The crawler has four sources: AniList, MyAnimeList, and TMDB use
+  official, documented, free JSON APIs, not scraping, so there is no
+  markup to keep in sync, and can each return a temporary error or get
+  rate limited; the crawler treats that as one source being
+  unavailable for that run rather than a reason to fail the whole
+  crawl. GL Archive (`crawler/sources/gl_archive.py`) is currently
+  disabled: its target site could not be confirmed as a real,
+  reachable catalog. See `docs/CRAWLER.md` for what each source
+  actually covers and how it was verified.
 - A `Dockerfile` builds the backend as described in
   `docs/DEPLOYMENT.md`. The frontend is a static build deployed
   separately; it has no Dockerfile of its own.

@@ -12,14 +12,18 @@ reach the browser:
     POST   /run             queue and start a crawl run
     GET    /runs/{run_id}   poll one crawl run's live status
     PATCH  /titles          edit a title and log the admin action
-    PATCH  /announcements   change an announcement's status and log it
+    POST   /announcements   create a new draft announcement
+    PATCH  /announcements   edit an announcement's content and/or status, and log it
     PATCH  /sources         enable/disable a source or change its priority
     POST   /review/{id}/publish  approve a crawl_item: publish its title,
-                                  or create one for an uncertain match
+                                  or create one for an uncertain match.
+                                  Takes an optional JSON body of field
+                                  corrections, see ALLOWED_REVIEW_OVERRIDE_FIELDS
     POST   /review/{id}/reject   mark a crawl_item rejected, no title write
     POST   /review/{id}/merge    apply an uncertain match's data onto the
                                   title it matched, same as a confident
-                                  crawler match would have
+                                  crawler match would have. Also takes the
+                                  same optional field corrections as publish
 
 Run it directly with:
 
@@ -34,6 +38,7 @@ within one process's memory, and the crawl itself runs as a background
 task inside this same process, not a separate job queue. See
 docs/DEPLOYMENT.md.
 """
+import json
 import os
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -47,6 +52,7 @@ from supabase import create_client, Client
 from .config import CRAWLER_SECRET, ENVIRONMENT, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL
 from .main import LockedTitleError, apply_update_to_title, insert_new_title, link_title_source, run_crawl
 from .models import RawCrawlItem
+from .normalizer import slugify
 
 # Allowed origin for browser requests. "*" is fine for local
 # development; set FRONTEND_ORIGIN to your deployed frontend's exact
@@ -94,6 +100,62 @@ ALLOWED_TITLE_FIELDS = {
 # client sent was passed straight to Postgres and only a check
 # constraint violation (a raw 500) caught a typo.
 ALLOWED_ANNOUNCEMENT_STATUSES = {"draft", "published", "unpublished"}
+
+# Explicit allow-list for the content fields PATCH /announcements and
+# POST /announcements accept. status and slug are handled separately:
+# status has its own check above, slug is generated server side on
+# create so two announcements never collide.
+ALLOWED_ANNOUNCEMENT_FIELDS = {
+    "title",
+    "summary",
+    "content",
+    "cover_image",
+    "related_title_id",
+    "source_url",
+    "source_name",
+    "announcement_type",
+}
+
+REQUIRED_ANNOUNCEMENT_FIELDS = {"title", "summary", "content", "announcement_type"}
+
+# Matches the `announcement_type` check constraint
+# (supabase/migrations/006_announcements.sql), checked here so a typo
+# is a clean 400 instead of a raw Postgres constraint error.
+ANNOUNCEMENT_TYPES = {
+    "New Release",
+    "Release Date",
+    "Trailer",
+    "Casting",
+    "Production",
+    "Streaming",
+    "Poster",
+    "Status Update",
+    "Other GL",
+}
+
+# Explicit allow-list for the optional edits an admin can make while
+# publishing or merging a review queue item (POST /review/{id}/publish
+# and /merge), matched to RawCrawlItem's own field names (models.py),
+# not the titles table's column names, since these get merged into the
+# crawl_item's payload before it is re-validated as a RawCrawlItem.
+# source_url, source_name, and the external ids are left out here on
+# purpose: those identify where the item came from and should stay as
+# the crawler found them, not be hand edited from a quick review form.
+ALLOWED_REVIEW_OVERRIDE_FIELDS = {
+    "title",
+    "original_title",
+    "type",
+    "year",
+    "release_date",
+    "country",
+    "language",
+    "status",
+    "episode_count",
+    "runtime_minutes",
+    "description",
+    "poster_url",
+    "official_url",
+}
 
 # Explicit allow-list for PATCH /sources: an admin can turn a source
 # on/off and reorder it, not rewrite its URL or type from this
@@ -305,38 +367,50 @@ async def patch_title(request: Request, authorization: Optional[str] = Header(No
 
 @app.patch("/announcements")
 async def patch_announcement(request: Request, authorization: Optional[str] = Header(None)) -> dict:
+    """Edits an announcement's content fields, its status, or both in
+    one call. Previously this only ever changed status; there was no
+    way to edit title/summary/content/etc. once a draft existed."""
     profile = _require_admin(authorization)
     body: dict[str, Any] = await request.json()
 
     announcement_id = body.get("id")
+    if not announcement_id:
+        raise HTTPException(status_code=400, detail="Missing id.")
+
+    fields = {key: value for key, value in body.items() if key in ALLOWED_ANNOUNCEMENT_FIELDS}
+
     status = body.get("status")
-    if not announcement_id or not status:
-        raise HTTPException(status_code=400, detail="Missing id or status.")
-    if status not in ALLOWED_ANNOUNCEMENT_STATUSES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"status must be one of {sorted(ALLOWED_ANNOUNCEMENT_STATUSES)}.",
-        )
+    if status is not None:
+        if status not in ALLOWED_ANNOUNCEMENT_STATUSES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"status must be one of {sorted(ALLOWED_ANNOUNCEMENT_STATUSES)}.",
+            )
+        fields["status"] = status
+
+    if not fields:
+        raise HTTPException(status_code=400, detail="No editable fields provided.")
+    fields["updated_at"] = _now_iso()
 
     admin = get_admin_client()
     try:
-        updated_rows = (
-            admin.table("announcements")
-            .update({"status": status, "updated_at": _now_iso()})
-            .eq("id", announcement_id)
-            .execute()
-            .data
-        )
+        updated_rows = admin.table("announcements").update(fields).eq("id", announcement_id).execute().data
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     if not updated_rows:
         raise HTTPException(status_code=404, detail="Announcement not found.")
     updated = updated_rows[0]
 
+    action = "edit"
+    if status == "published":
+        action = "publish"
+    elif status == "unpublished":
+        action = "unpublish"
+
     admin.table("admin_actions").insert(
         {
             "admin_id": profile["id"],
-            "action": "publish" if status == "published" else "unpublish",
+            "action": action,
             "entity_type": "announcement",
             "entity_id": announcement_id,
             "new_value": updated,
@@ -344,6 +418,54 @@ async def patch_announcement(request: Request, authorization: Optional[str] = He
     ).execute()
 
     return {"announcement": updated}
+
+
+@app.post("/announcements")
+async def create_announcement(request: Request, authorization: Optional[str] = Header(None)) -> dict:
+    """Creates a new announcement draft directly from the admin UI.
+    There is no crawler source for announcements yet (see
+    docs/CRAWLER.md), so until one exists, or as well as one once it
+    does, this is how an admin writes one by hand."""
+    profile = _require_admin(authorization)
+    body: dict[str, Any] = await request.json()
+
+    missing = REQUIRED_ANNOUNCEMENT_FIELDS - body.keys()
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Missing required field(s): {sorted(missing)}.")
+    if body["announcement_type"] not in ANNOUNCEMENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"announcement_type must be one of {sorted(ANNOUNCEMENT_TYPES)}.")
+
+    fields = {key: value for key, value in body.items() if key in ALLOWED_ANNOUNCEMENT_FIELDS}
+
+    admin = get_admin_client()
+    base_slug = slugify(fields["title"], None)
+    slug = base_slug
+    suffix = 2
+    while admin.table("announcements").select("id").eq("slug", slug).limit(1).execute().data:
+        slug = f"{base_slug}-{suffix}"
+        suffix += 1
+    fields["slug"] = slug
+    fields["status"] = "draft"
+
+    try:
+        inserted_rows = admin.table("announcements").insert(fields).execute().data
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if not inserted_rows:
+        raise HTTPException(status_code=500, detail="Insert into announcements returned no row.")
+    created = inserted_rows[0]
+
+    admin.table("admin_actions").insert(
+        {
+            "admin_id": profile["id"],
+            "action": "create",
+            "entity_type": "announcement",
+            "entity_id": created["id"],
+            "new_value": created,
+        }
+    ).execute()
+
+    return {"announcement": created}
 
 
 @app.patch("/sources")
@@ -399,19 +521,61 @@ def _load_reviewable_crawl_item(admin: Client, crawl_item_id: str) -> dict:
     return crawl_item
 
 
+async def _read_review_overrides(request: Request) -> dict:
+    """POST /review/{id}/publish and /merge both used to take no body
+    at all. A request with no body, or an empty JSON object, is the
+    normal case (publish/merge with no corrections) and must not
+    raise; anything present is filtered to ALLOWED_REVIEW_OVERRIDE_FIELDS
+    so the rest of this file's field allow-list pattern still holds
+    here too."""
+    try:
+        raw_body = await request.body()
+        payload = json.loads(raw_body) if raw_body else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        payload = {}
+    if not isinstance(payload, dict):
+        return {}
+    return {key: value for key, value in payload.items() if key in ALLOWED_REVIEW_OVERRIDE_FIELDS}
+
+
+# ALLOWED_REVIEW_OVERRIDE_FIELDS uses RawCrawlItem's own field names
+# (models.py). Most match the titles table's column names exactly;
+# these three don't, so publish_review_item's already-existing-title
+# branch (which writes straight to titles, not through
+# crawler/main.py's build_title_fields) needs the rename.
+_REVIEW_OVERRIDE_TO_TITLE_FIELD = {"title": "canonical_title", "year": "release_year", "status": "release_status"}
+
+
+def _review_overrides_to_title_fields(overrides: dict) -> dict:
+    fields = {}
+    for key, value in overrides.items():
+        db_key = _REVIEW_OVERRIDE_TO_TITLE_FIELD.get(key, key)
+        if db_key == "type" and value:
+            value = str(value).lower()  # matches the titles table's check constraint
+        fields[db_key] = value
+    return fields
+
+
 @app.post("/review/{crawl_item_id}/publish")
-def publish_review_item(crawl_item_id: str, authorization: Optional[str] = Header(None)) -> dict:
+async def publish_review_item(crawl_item_id: str, request: Request, authorization: Optional[str] = Header(None)) -> dict:
     """The admin review queue's Publish action. For a 'new' or
     'updated' item the crawler already wrote (or updated) the title;
     this just flips it live. For an 'uncertain' item, an admin looking
     at it decided it is not actually the title it was compared to, so
-    this creates a new title for it instead, already published."""
+    this creates a new title for it instead, already published.
+
+    Optionally takes a JSON body of field corrections (see
+    ALLOWED_REVIEW_OVERRIDE_FIELDS), so an admin can fix a wrong title,
+    year, description, poster, etc. right when they publish it instead
+    of publishing the crawler's raw guess and fixing it in a second
+    step."""
     profile = _require_admin(authorization)
+    overrides = await _read_review_overrides(request)
     admin = get_admin_client()
     crawl_item = _load_reviewable_crawl_item(admin, crawl_item_id)
 
     if crawl_item["state"] == "uncertain":
-        item = RawCrawlItem.model_validate(crawl_item["payload"])
+        item = RawCrawlItem.model_validate({**crawl_item["payload"], **overrides})
         title_id = insert_new_title(admin, item, source_name=item.source_name, published=True)
         link_title_source(admin, title_id, crawl_item["source_id"], str(item.source_url))
         admin.table("crawl_items").update({"matched_title_id": title_id, "state": "new"}).eq(
@@ -421,7 +585,10 @@ def publish_review_item(crawl_item_id: str, authorization: Optional[str] = Heade
         title_id = crawl_item["matched_title_id"]
         if not title_id:
             raise HTTPException(status_code=400, detail="This crawl item has no title to publish.")
-        admin.table("titles").update({"is_published": True, "updated_at": _now_iso()}).eq("id", title_id).execute()
+        title_fields = _review_overrides_to_title_fields(overrides)
+        admin.table("titles").update({**title_fields, "is_published": True, "updated_at": _now_iso()}).eq(
+            "id", title_id
+        ).execute()
 
     title = admin.table("titles").select("*").eq("id", title_id).maybe_single().execute().data
     admin.table("admin_actions").insert(
@@ -467,12 +634,16 @@ def reject_review_item(crawl_item_id: str, authorization: Optional[str] = Header
 
 
 @app.post("/review/{crawl_item_id}/merge")
-def merge_review_item(crawl_item_id: str, authorization: Optional[str] = Header(None)) -> dict:
+async def merge_review_item(crawl_item_id: str, request: Request, authorization: Optional[str] = Header(None)) -> dict:
     """The admin review queue's Merge action: confirms an 'uncertain'
     match really is the same title crawler/deduplicator.py flagged it
     against, and applies the crawl item's data to it exactly like a
-    confident crawler match would have."""
+    confident crawler match would have.
+
+    Takes the same optional field corrections as publish (see
+    ALLOWED_REVIEW_OVERRIDE_FIELDS)."""
     profile = _require_admin(authorization)
+    overrides = await _read_review_overrides(request)
     admin = get_admin_client()
     crawl_item = _load_reviewable_crawl_item(admin, crawl_item_id)
 
@@ -480,7 +651,7 @@ def merge_review_item(crawl_item_id: str, authorization: Optional[str] = Header(
     if not title_id:
         raise HTTPException(status_code=400, detail="This crawl item has no matching title to merge into.")
 
-    item = RawCrawlItem.model_validate(crawl_item["payload"])
+    item = RawCrawlItem.model_validate({**crawl_item["payload"], **overrides})
     try:
         changed = apply_update_to_title(admin, title_id, item, crawl_item["source_id"], source_name=item.source_name)
     except LockedTitleError as exc:
