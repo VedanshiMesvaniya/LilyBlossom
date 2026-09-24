@@ -57,11 +57,16 @@ still sits purely in `crawl_items` until a human resolves it. See
   `uncertain` item, creates and publishes a new title from it). Merge
   (only shown for `uncertain` items) confirms it is the same title it
   matched and applies its data. Reject marks it resolved without
-  touching any title.
+  touching any title. Edit opens a small form (title, year, type,
+  release status, description, poster URL); saving it sends those
+  corrections along with Publish or Merge in the same request, instead
+  of publishing the crawler's raw guess and fixing it afterward.
 - `/admin/announcements`: every announcement, draft or published, with
-  working publish and unpublish actions. There is no content editor
-  yet, drafts still need to be created directly or by a future
-  announcement source.
+  working publish and unpublish actions. New announcement opens a form
+  to write a fresh draft by hand (title, type, summary, content, cover
+  image); Edit opens the same form pre filled to correct an existing
+  one. There is still no crawler-driven announcement source, see
+  `docs/CRAWLER.md`, so every announcement is written by an admin.
 - `/admin/sources`: every source, with the last crawl time and last
   error, and working enable/disable and priority controls, so this
   page actually controls which sources the crawler runs (previously it
@@ -69,11 +74,12 @@ still sits purely in `crawl_items` until a human resolves it. See
 
 ## Audit log
 
-Every publish, unpublish, edit, merge, delete, approve, reject, and
-crawler run performed by an admin is written to `admin_actions` with
-the admin's id, the old value, and the new value. The endpoints in
-`crawler/worker.py` write this row automatically; a new admin action
-should follow the same pattern rather than skip logging.
+Every publish, unpublish, create, edit, merge, delete, approve,
+reject, and crawler run performed by an admin is written to
+`admin_actions` with the admin's id, the old value, and the new
+value. The endpoints in `crawler/worker.py` write this row
+automatically; a new admin action should follow the same pattern
+rather than skip logging.
 
 ## What admins cannot bypass
 

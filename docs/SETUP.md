@@ -11,6 +11,8 @@ your own Supabase project, your own TMDB key, and your own secrets.
 - A Supabase account (the free tier is enough to start)
 - Optional for now, needed before enabling poster enrichment: a TMDB
   API key from https://www.themoviedb.org/settings/api
+- Nothing extra needed for MyAnimeList: `crawler/sources/jikan.py`
+  uses the free, keyless Jikan API as soon as the crawler runs.
 
 ## 2. Create the Supabase project
 
@@ -21,8 +23,12 @@ your own Supabase project, your own TMDB key, and your own secrets.
    variable, Vite exposes every `VITE_` prefixed variable to the
    browser bundle.
 3. In the SQL editor, run every file in `supabase/migrations/` in
-   order, `001` through `009`. Each file is idempotent where practical,
-   but running them out of order will fail on missing tables.
+   numeric order, from the lowest number through the highest one
+   currently in that folder. Each file is idempotent where practical,
+   but running them out of order will fail on missing tables. Do not
+   skip `018_seed_countries.sql`: titles.country is a foreign key to
+   the countries table, and without those rows the crawler cannot
+   save any title.
 4. Create three storage buckets: `title-posters`, `title-backdrops`,
    and `avatars`, plus `announcement-images`. Mark them public if you
    want images to load without a signed URL, and rely on the RLS
@@ -135,3 +141,34 @@ supabase functions deploy crawler-trigger
 
 Then run `docs/SUPABASE_CRON.sql` in the SQL editor, filling in your
 deployed function URL.
+
+## 10. Troubleshooting
+
+**"Failed to fetch" on login or on the home page lists.** The browser
+could not reach Supabase at all. Check, in this order:
+
+1. `VITE_SUPABASE_URL` in `.env` is exactly the Project URL, like
+   `https://abcdefgh.supabase.co`. No trailing path, and not the
+   dashboard address. The app now removes a trailing slash or a pasted
+   `/rest/v1` by itself, and warns in the browser console when the URL
+   does not look right.
+2. Restart `npm run dev` after any change to `.env`. Vite reads it only
+   at start.
+3. Open `https://<your-project>.supabase.co/auth/v1/health` in the
+   browser. If it does not load, the project may be paused (free
+   projects pause after a week of no use, restore it in the Supabase
+   dashboard) or your network or DNS is blocking supabase.co. In
+   India, ISPs blocked supabase.co in February 2026 and access was
+   reported restored in March 2026, so if it fails only on one network,
+   try another network or a public DNS such as 1.1.1.1.
+4. An ad blocker or privacy extension can also block the request. Try
+   a private window with extensions off.
+
+**A crawl finds items but saves none, or every item shows as an
+error.** Run `supabase/migrations/018_seed_countries.sql`, then run the
+crawl again. The crawl report names the cause when the countries table
+is empty.
+
+**The crawl button does nothing or returns 401.** Sign in as an admin
+(step 6), and make sure the backend is running and `CRAWLER_SECRET`
+matches.

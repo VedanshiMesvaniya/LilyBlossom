@@ -78,16 +78,25 @@ architecture described above:
   a `/profile` edit form for username, bio, favorite GL, and favorite
   pairing, all previously present in the database but not reachable
   from any page.
-- The crawler's three sources are GL Archive, AniList, and TMDB:
-  - GL Archive (`crawler/sources/gl_archive.py`) scrapes the live
-    catalog page directly. Its CSS selectors were checked against
-    that site's real markup.
-  - AniList and TMDB (`crawler/sources/anilist.py`,
-    `crawler/sources/tmdb.py`) use official, documented JSON APIs, not
-    scraping, so there is no markup to keep in sync. AniList can
-    return a temporary error or get rate limited; the crawler treats
-    that as one source being unavailable for that run rather than a
-    reason to fail the whole crawl, see `docs/CRAWLER.md`.
+- AniList is the main global crawler source. One query covers every
+  region (Japan, China, Korea and others) and stores each title with
+  its country. A run prints a per region count. Migration
+  `018_seed_countries.sql` must be run, because titles.country is a
+  foreign key to the countries table; without it every crawl insert
+  failed. See docs/CRAWLER.md.
+- The crawler has four sources: AniList, MyAnimeList, and TMDB use
+  official, documented, free JSON APIs, not scraping, so there is no
+  markup to keep in sync, and can each return a temporary error or get
+  rate limited; the crawler treats that as one source being
+  unavailable for that run rather than a reason to fail the whole
+  crawl. Two sources are currently disabled by default, each for a
+  different reason: GL Archive (`crawler/sources/gl_archive.py`)
+  because its target site could not be confirmed as a real, reachable
+  catalog, and MyAnimeList (`crawler/sources/jikan.py`) because using
+  its free API to populate another database appears to breach
+  MyAnimeList's own Terms of Service, a decision someone needs to
+  make before turning it on. See `docs/CRAWLER.md` for what each
+  source actually covers and how it was verified.
 - A `Dockerfile` builds the backend as described in
   `docs/DEPLOYMENT.md`. The frontend is a static build deployed
   separately; it has no Dockerfile of its own.

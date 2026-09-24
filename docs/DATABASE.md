@@ -40,6 +40,11 @@ during development instead of only being caught by RLS in production.
 - `titles`: the shared catalog. `is_published` gates whether normal
   users can see a row at all; unpublished rows exist for the admin
   review workflow.
+- `countries`: reference data, one row per ISO 3166-1 alpha-2 code,
+  seeded by `018_seed_countries.sql`. `titles.country` is a foreign key
+  to it, so this table must be filled before the crawler can save a
+  title with a country. The crawler blanks a code that is not in the
+  table instead of failing the write.
 - `user_media_status`: primary key is `(user_id, title_id)`, so a user
   can have exactly one status per title. A trigger automatically flips
   `status` to `watched` when `progress` reaches 100, but the user can

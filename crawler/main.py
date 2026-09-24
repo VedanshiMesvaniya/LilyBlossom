@@ -33,6 +33,7 @@ be true at once.
 import argparse
 import sys
 import time
+from collections import Counter
 from datetime import datetime, timezone
 
 import httpx
@@ -47,6 +48,7 @@ from .poster_handler import store_poster_for_title
 from .sources.base import SourceAdapter
 from .sources.gl_archive import GLArchiveAdapter
 from .sources.anilist import AniListAdapter
+from .sources.jikan import MyAnimeListAdapter
 from .sources.tmdb import TMDBAdapter
 
 # Registering a new source here is still step one for a new adapter
@@ -58,6 +60,7 @@ from .sources.tmdb import TMDBAdapter
 SOURCE_REGISTRY: list[type[SourceAdapter]] = [
     GLArchiveAdapter,
     AniListAdapter,
+    MyAnimeListAdapter,
     TMDBAdapter,
 ]
 
@@ -65,7 +68,7 @@ SOURCE_REGISTRY: list[type[SourceAdapter]] = [
 def get_supabase() -> Client:
     if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
         raise RuntimeError(
-            "NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set "
+            "VITE_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in .env "
             "for the crawler to read/write the catalog."
         )
     return create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
@@ -75,10 +78,33 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+ROWS_PER_PAGE = 1000  # Supabase returns at most 1000 rows per request by default.
+
+
+def _fetch_all_rows(build_query) -> list[dict]:
+    """Reads every row of a query, one page at a time.
+
+    Supabase silently caps one request at 1000 rows. Before this, the
+    crawler read only the first 1000 titles, so once the catalog grew
+    past that, known titles looked new and were inserted again.
+    `build_query` must return a fresh, ordered query on each call.
+    """
+    rows: list[dict] = []
+    start = 0
+    while True:
+        batch = build_query().range(start, start + ROWS_PER_PAGE - 1).execute().data or []
+        rows.extend(batch)
+        if len(batch) < ROWS_PER_PAGE:
+            return rows
+        start += ROWS_PER_PAGE
+
+
 def load_existing_candidates(supabase: Client) -> list[CandidateTitle]:
-    response = supabase.table("titles").select(
-        "id, canonical_title, release_year, country, tmdb_id, imdb_id, anilist_id"
-    ).execute()
+    rows = _fetch_all_rows(
+        lambda: supabase.table("titles")
+        .select("id, canonical_title, release_year, country, tmdb_id, imdb_id, anilist_id")
+        .order("id")
+    )
     return [
         CandidateTitle(
             id=row["id"],
@@ -89,8 +115,32 @@ def load_existing_candidates(supabase: Client) -> list[CandidateTitle]:
             imdb_id=row.get("imdb_id"),
             anilist_id=row.get("anilist_id"),
         )
-        for row in response.data
+        for row in rows
     ]
+
+
+def load_known_country_codes(supabase: Client) -> set[str]:
+    """Every code in the countries table. titles.country is a foreign
+    key to it, so a code that is not in here cannot be written."""
+    rows = _fetch_all_rows(lambda: supabase.table("countries").select("code").order("code"))
+    return {row["code"].upper() for row in rows}
+
+
+def sanitize_item_country(item: RawCrawlItem, known_countries: set[str] | None, unknown_codes: set[str]) -> RawCrawlItem:
+    """Returns the item with a country the database can accept.
+
+    A code that is not in the countries table is dropped (set to None)
+    and remembered in `unknown_codes` for the report, instead of letting
+    the foreign key on titles.country fail the write for that item.
+    Unknown is better than a made up value, see validator.py.
+    """
+    if not item.country or known_countries is None:
+        return item
+    code = item.country.strip().upper()
+    if code in known_countries:
+        return item.model_copy(update={"country": code}) if code != item.country else item
+    unknown_codes.add(code)
+    return item.model_copy(update={"country": None})
 
 
 def load_enabled_sources(supabase: Client | None) -> list[tuple[SourceAdapter, dict | None]]:
@@ -99,9 +149,10 @@ def load_enabled_sources(supabase: Client | None) -> list[tuple[SourceAdapter, d
     Honors the `sources` table's `enabled` flag and `priority` order,
     so Admin -> Sources controls which adapters actually run (this was
     previously hardcoded and the admin page had no effect on it).
-    Falls back to every adapter in SOURCE_REGISTRY, all enabled, when
-    there is no database connection (a dry run) or the `sources` table
-    has no rows yet, so a fresh checkout still crawls everything out of
+    Falls back to every adapter in SOURCE_REGISTRY, all enabled, only
+    when there is no database connection (a dry run) or the `sources`
+    table has no rows at all. If rows exist but none is enabled, nothing
+    runs, so a fresh checkout still crawls everything out of
     the box before anyone has touched the Sources admin page or run
     the seed migration (supabase/migrations/012_seed_sources.sql).
     """
@@ -110,9 +161,16 @@ def load_enabled_sources(supabase: Client | None) -> list[tuple[SourceAdapter, d
     if supabase is None:
         return [(cls(), None) for cls in SOURCE_REGISTRY]
 
-    rows = supabase.table("sources").select("*").eq("enabled", True).order("priority").execute().data
-    if not rows:
+    all_rows = supabase.table("sources").select("*").order("priority").execute().data
+    if not all_rows:
+        # The table itself is empty (nothing seeded yet): run everything.
         return [(cls(), None) for cls in SOURCE_REGISTRY]
+
+    # The table has rows, so it is the only authority. Rows that are
+    # all switched off mean "run nothing". This used to fall back to
+    # every adapter when no row was enabled, which quietly ran the
+    # sources an admin had disabled on purpose (GL Archive, MyAnimeList).
+    rows = [row for row in all_rows if row.get("enabled")]
 
     pairs: list[tuple[SourceAdapter, dict | None]] = []
     for row in rows:
@@ -305,8 +363,6 @@ def _upsert_item(
     if match_state == "new":
         if write:
             title_id = insert_new_title(supabase, item, source_name, published=False)
-            fields = _without_nones(build_title_fields(item))
-            fields["canonical_slug"] = generate_unique_slug(supabase, used_slugs, item.title, item.year)
             candidates.append(
                 CandidateTitle(
                     id=title_id,
@@ -396,6 +452,9 @@ def run_crawl(dry_run: bool, run_id: str | None = None, supabase: Client | None 
 
     sources = load_enabled_sources(None if dry_run else supabase)
 
+    if not sources:
+        print("No sources are enabled. Turn at least one on in Admin, Sources, then run the crawl again.")
+
     with httpx.Client() as client:
         for adapter, source_row in sources:
             items, errors = adapter.run(client)
@@ -421,7 +480,10 @@ def run_crawl(dry_run: bool, run_id: str | None = None, supabase: Client | None 
                 status = "OK"
                 successful_sources += 1
             source_statuses.append((adapter.name, status))
-            source_results.append({"name": adapter.name, "status": status, "items_found": len(items)})
+            regions = dict(Counter(item.country or "unknown" for item in items).most_common())
+            source_results.append(
+                {"name": adapter.name, "status": status, "items_found": len(items), "regions": regions}
+            )
 
             if supabase is not None and source_row is not None:
                 source_update = {"last_crawled_at": _now_iso()}
@@ -434,10 +496,14 @@ def run_crawl(dry_run: bool, run_id: str | None = None, supabase: Client | None 
 
             time.sleep(1.5)  # politeness delay between sources
 
-    candidates = load_existing_candidates(supabase) if (supabase and not dry_run) else []
+    write_enabled = supabase is not None and not dry_run
+    candidates = load_existing_candidates(supabase) if write_enabled else []
+    known_countries = load_known_country_codes(supabase) if write_enabled else None
+    unknown_country_codes: set[str] = set()
     used_slugs: set[str] = set()
 
     for item, source_name, source_row in all_items:
+        item = sanitize_item_country(item, known_countries, unknown_country_codes)
         try:
             state = _upsert_item(
                 item=item,
@@ -491,6 +557,20 @@ def run_crawl(dry_run: bool, run_id: str | None = None, supabase: Client | None 
     for name, status in source_statuses:
         print(f"  {name}: {status}")
     print(f"Items found: {summary.items_found}")
+    for result in source_results:
+        if result.get("regions"):
+            breakdown = ", ".join(f"{code} {count}" for code, count in result["regions"].items())
+            print(f"  {result['name']} by region: {breakdown}")
+    if known_countries is not None and not known_countries:
+        print(
+            "WARNING: the countries table is empty, so no title got a country. "
+            "Run supabase/migrations/018_seed_countries.sql in the Supabase SQL editor."
+        )
+    elif unknown_country_codes:
+        print(
+            "Note: these country codes are not in the countries table and were left blank: "
+            + ", ".join(sorted(unknown_country_codes))
+        )
     print(
         f"New: {summary.new_items}  Updated: {summary.updated_items}  "
         f"Existing (unchanged): {summary.duplicates}  Uncertain: {summary.uncertain_items}"
