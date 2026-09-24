@@ -27,6 +27,11 @@ Nothing it finds is public until an admin publishes it, see
 `docs/ADMIN.md`. The only case still fully gated behind admin review
 before it touches `titles` at all is a genuinely unclear match.
 
+Once the `sources` table has rows, it is the only authority: a
+disabled source never runs, and if every source is disabled the crawl
+runs nothing and says so. Only an empty table, or a dry run with no
+database, runs every adapter.
+
 One broken source never stops the others. Each adapter's `run()`
 method (in `crawler/sources/base.py`) catches its own errors and
 returns them alongside whatever items it did manage to parse, so an
