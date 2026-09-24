@@ -59,7 +59,11 @@ from .normalizer import slugify
 # URL once this backend is deployed somewhere real, see
 # docs/DEPLOYMENT.md. ENVIRONMENT=production with FRONTEND_ORIGIN still
 # "*" is refused at startup rather than silently deployed wide open.
-FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "*")
+# An empty value counts as unset. .env.example ships the line
+# `FRONTEND_ORIGIN=` blank, and python-dotenv turns that into an empty
+# string (not a missing key), which used to make every browser request
+# fail CORS with "Failed to fetch".
+FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "").strip() or "*"
 
 if ENVIRONMENT == "production" and FRONTEND_ORIGIN == "*":
     raise RuntimeError(

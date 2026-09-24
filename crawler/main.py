@@ -149,9 +149,10 @@ def load_enabled_sources(supabase: Client | None) -> list[tuple[SourceAdapter, d
     Honors the `sources` table's `enabled` flag and `priority` order,
     so Admin -> Sources controls which adapters actually run (this was
     previously hardcoded and the admin page had no effect on it).
-    Falls back to every adapter in SOURCE_REGISTRY, all enabled, when
-    there is no database connection (a dry run) or the `sources` table
-    has no rows yet, so a fresh checkout still crawls everything out of
+    Falls back to every adapter in SOURCE_REGISTRY, all enabled, only
+    when there is no database connection (a dry run) or the `sources`
+    table has no rows at all. If rows exist but none is enabled, nothing
+    runs, so a fresh checkout still crawls everything out of
     the box before anyone has touched the Sources admin page or run
     the seed migration (supabase/migrations/012_seed_sources.sql).
     """
@@ -160,9 +161,16 @@ def load_enabled_sources(supabase: Client | None) -> list[tuple[SourceAdapter, d
     if supabase is None:
         return [(cls(), None) for cls in SOURCE_REGISTRY]
 
-    rows = supabase.table("sources").select("*").eq("enabled", True).order("priority").execute().data
-    if not rows:
+    all_rows = supabase.table("sources").select("*").order("priority").execute().data
+    if not all_rows:
+        # The table itself is empty (nothing seeded yet): run everything.
         return [(cls(), None) for cls in SOURCE_REGISTRY]
+
+    # The table has rows, so it is the only authority. Rows that are
+    # all switched off mean "run nothing". This used to fall back to
+    # every adapter when no row was enabled, which quietly ran the
+    # sources an admin had disabled on purpose (GL Archive, MyAnimeList).
+    rows = [row for row in all_rows if row.get("enabled")]
 
     pairs: list[tuple[SourceAdapter, dict | None]] = []
     for row in rows:
@@ -443,6 +451,9 @@ def run_crawl(dry_run: bool, run_id: str | None = None, supabase: Client | None 
         supabase.table("crawl_runs").update({"status": "running"}).eq("id", run_id).execute()
 
     sources = load_enabled_sources(None if dry_run else supabase)
+
+    if not sources:
+        print("No sources are enabled. Turn at least one on in Admin, Sources, then run the crawl again.")
 
     with httpx.Client() as client:
         for adapter, source_row in sources:
