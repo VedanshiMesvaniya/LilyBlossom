@@ -154,9 +154,15 @@ What the query asks for:
   catalog.
 - Release date when AniList knows the year, month and day.
 
-It pages through up to `MAX_ANILIST_PAGES` pages of 50 (default 5, so
-up to 250 titles per run; raise it for a bigger first import) using
-`pageInfo.hasNextPage`, with a short pause between pages. AniList
+It runs one query per country of origin (`ANILIST_COUNTRIES`, default
+JP, CN, KR, TW, TH, US, GB, FR, DE, ES, IT, BR, MX, IN, PH, ID, VN),
+each with its own page budget. A single query sorted by popularity
+used up all its pages inside Japan (the report showed `JP 250` and
+nothing else), so China, Korea and Taiwan were never reached. Each
+country pages through up to `MAX_ANILIST_PAGES` pages of 50 (default
+20, and it stops early when `pageInfo.hasNextPage` is false), with a
+short pause between requests. If one country fails, the others still
+run and the report names the country that failed. AniList
 allows about 90 requests a minute. On a 429 the adapter waits for the
 `Retry-After` header and tries again. A GraphQL error, a body that is
 not JSON, or a network failure is reported as this source being
@@ -250,12 +256,37 @@ announcement is admin authored.
 
 `crawler/sources/tmdb.py` has two roles:
 
+- `TMDBAdapter` loads full details for every title it discovers.
+  `/discover` returns only a short summary (no episode count, seasons,
+  runtime, status, language, IMDb id, and no country for movies), so
+  before this every TMDB title was saved as "Announced" with blanks.
+  For each result the adapter now calls `/tv/{id}` (with
+  `external_ids`) or `/movie/{id}` and fills: `episode_count` and a
+  season list (series), `runtime_minutes` (movies), full
+  `release_date`, `release_status` (mapped from TMDB's status: Ended is
+  Completed, Returning Series is Airing, Canceled is Cancelled, a future
+  date is Upcoming), `language`, `country`, `imdb_id` and the official
+  site. A title TMDB has no page for is kept as is. If details keep
+  failing for some titles (rate limit, server error), the report says
+  how many, and those titles are saved with the fields discover gave.
+  When TMDB has no first air date or episode count yet (a show that has
+  not aired), the release date falls back to the next episode date or
+  the earliest season date, and the episode count to the sum of the
+  season episode counts. Seasons go to `title_seasons` (migration 019). Per episode lists
+  (each episode's title and air date) are not stored yet.
 - `TMDBAdapter` is a source adapter, registered in `SOURCE_REGISTRY`.
   It discovers GL live-action titles through TMDB's `/discover/tv` and
   `/discover/movie` endpoints filtered to GL specific keywords, so it
-  does not pull in TMDB's general catalog. It pages through up to
-  `MAX_TMDB_PAGES` pages per endpoint (`crawler/config.py`, default
-  5), stopping early once TMDB reports there are no more pages,
+  does not pull in TMDB's general catalog. It runs one pass with no
+  region filter and then one pass per region in `TMDB_REGIONS`
+  (`with_origin_country`, about 50 regions such as TH, KR, JP, CN, TW,
+  PH, VN, ID, IN, US, GB, ES, MX, BR), because popularity sorting let
+  a few big regions fill every page and regional GL barely appeared.
+  A title found by several passes is loaded once. It also looks up
+  extra GL keywords (`GL_EXTRA_KEYWORD_NAMES`) and uses one only when
+  TMDB has a keyword with exactly that name. It pages through up to
+  `MAX_TMDB_PAGES` pages per pass (`crawler/config.py`, default
+  10), stopping early once TMDB reports there are no more pages,
   rather than only ever reading page 1. Keyword ids used to be
   hardcoded here (`GL_KEYWORD_IDS`); checking that list against the
   live TMDB site showed most of the ids did not match any real

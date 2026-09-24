@@ -18,6 +18,15 @@ ReleaseStatus = Literal[
 CrawlState = Literal["new", "existing", "updated", "duplicate", "uncertain", "error"]
 
 
+class SeasonInfo(BaseModel):
+    """One season of a series: its number, name, episode count and air date."""
+
+    season_number: int
+    name: Optional[str] = None
+    episode_count: Optional[int] = None
+    air_date: Optional[date] = None
+
+
 class RawCrawlItem(BaseModel):
     """Standardized output of a source adapter's parse() + normalize()."""
 
@@ -39,6 +48,7 @@ class RawCrawlItem(BaseModel):
     tmdb_id: Optional[str] = None
     anilist_id: Optional[str] = None
     imdb_id: Optional[str] = None
+    seasons: list[SeasonInfo] = Field(default_factory=list)
 
 
 class NormalizedItem(RawCrawlItem):

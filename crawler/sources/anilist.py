@@ -26,14 +26,14 @@ from typing import Any
 
 import httpx
 
-from ..config import ANILIST_MIN_TAG_RANK, MAX_ANILIST_PAGES, MAX_RETRIES, REQUEST_TIMEOUT_SECONDS
+from ..config import ANILIST_COUNTRIES, ANILIST_MIN_TAG_RANK, MAX_ANILIST_PAGES, MAX_RETRIES, REQUEST_TIMEOUT_SECONDS
 from ..models import RawCrawlItem
 from .base import SourceAdapter
 
 ANILIST_GRAPHQL_URL = "https://graphql.anilist.co"
 
-YURI_QUERY = """
-query ($page: Int, $perPage: Int, $minRank: Int) {
+_QUERY_TEMPLATE = """
+query ($page: Int, $perPage: Int, $minRank: Int__VAR__) {
   Page(page: $page, perPage: $perPage) {
     pageInfo {
       hasNextPage
@@ -44,7 +44,7 @@ query ($page: Int, $perPage: Int, $minRank: Int) {
       type: ANIME
       format_in: [TV, TV_SHORT, MOVIE, OVA, ONA]
       isAdult: false
-      sort: POPULARITY_DESC
+      sort: POPULARITY_DESC__ARG__
     ) {
       id
       title {
@@ -72,6 +72,12 @@ query ($page: Int, $perPage: Int, $minRank: Int) {
   }
 }
 """
+
+# One query for everything, and the same query limited to one country.
+YURI_QUERY = _QUERY_TEMPLATE.replace("__VAR__", "").replace("__ARG__", "")
+YURI_QUERY_BY_COUNTRY = _QUERY_TEMPLATE.replace("__VAR__", ", $country: CountryCode").replace(
+    "__ARG__", "\n      countryOfOrigin: $country"
+)
 
 STATUS_MAP = {
     "FINISHED": "Completed",
@@ -103,6 +109,7 @@ class AniListAdapter(SourceAdapter):
 
     # Pause between pages, to stay under AniList's 90 requests a minute.
     page_delay_seconds = 0.8
+    pass_failures: list[str] = []
 
     def _post(self, client: httpx.Client, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         headers = {
@@ -159,23 +166,46 @@ class AniListAdapter(SourceAdapter):
         raise last_error
 
     def fetch(self, client: httpx.Client) -> list[str]:
-        payloads = []
+        """One pass per country in ANILIST_COUNTRIES, each with its own
+        page budget (MAX_ANILIST_PAGES). A pass that fails is noted in
+        `pass_failures` and the other countries still run. Only when
+        every pass fails does the error reach the caller."""
+        payloads: list[str] = []
+        self.pass_failures = []
+        last_error: Exception | None = None
+
+        for country in ANILIST_COUNTRIES or [None]:
+            try:
+                self._fetch_country(client, country, payloads)
+            except Exception as exc:  # noqa: BLE001 - one country failing must not lose the rest
+                last_error = exc
+                self.pass_failures.append(country or "all countries")
+
+        if not payloads and last_error is not None:
+            raise last_error
+        return payloads
+
+    def _fetch_country(self, client: httpx.Client, country: str | None, payloads: list[str]) -> None:
         page = 1
         has_next_page = True
-
         while has_next_page and page <= MAX_ANILIST_PAGES:
-            if page > 1:
+            if payloads:
                 time.sleep(self.page_delay_seconds)
-            data = self._post(
-                client,
-                YURI_QUERY,
-                {"page": page, "perPage": 50, "minRank": ANILIST_MIN_TAG_RANK},
-            )
+            variables: dict[str, Any] = {"page": page, "perPage": 50, "minRank": ANILIST_MIN_TAG_RANK}
+            query = YURI_QUERY
+            if country:
+                variables["country"] = country
+                query = YURI_QUERY_BY_COUNTRY
+            data = self._post(client, query, variables)
             payloads.append(json.dumps(data))
             has_next_page = bool(data.get("data", {}).get("Page", {}).get("pageInfo", {}).get("hasNextPage"))
             page += 1
 
-        return payloads
+    def run(self, client: httpx.Client):  # type: ignore[override]
+        items, errors = super().run(client)
+        if self.pass_failures and not any("fetch failed" in e for e in errors):
+            errors.append(f"AniList: could not fetch these countries: {', '.join(self.pass_failures)}")
+        return items, errors
 
     def parse(self, raw_payload: str) -> list[dict[str, Any]]:
         data = json.loads(raw_payload)

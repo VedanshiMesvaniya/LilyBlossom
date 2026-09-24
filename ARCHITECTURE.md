@@ -126,7 +126,12 @@ real confidence, and only leaves a genuinely unclear match for a human:
    - An unclear match (0.80-0.95 fuzzy confidence): nothing is written
      to `titles`. It waits in `crawl_items` as `uncertain` for a human.
 5. Every title the item touched, new or existing, gets a `title_sources`
-   row linking it back to where it was found.
+   row linking it back to where it was found. For a series that has a
+   season list (TMDB), the seasons are also written to `title_seasons`
+   (number, name, episode count, air date), which the series detail page
+   reads. The TMDB adapter loads each title's detail page for this,
+   because its list endpoint has no episode count, seasons, runtime or
+   status.
 6. Every item is also logged to `crawl_items` (state: `new`, `updated`,
    `existing`, or `uncertain`) alongside the `crawl_runs` row it came
    from, so the admin crawler page has a full per-run history.

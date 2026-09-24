@@ -328,6 +328,42 @@ def apply_update_to_title(
     return True
 
 
+_seasons_warning_printed = False
+
+
+def save_seasons(supabase: Client, title_id: str, item: RawCrawlItem) -> None:
+    """Writes the season list (number, name, episode count, air date)
+    for a series into title_seasons, replacing older values.
+
+    A missing table (migration 019 not run yet) or any other failure
+    here must never fail the title itself, so it is reported once and
+    skipped.
+    """
+    global _seasons_warning_printed
+    rows = [
+        {
+            "title_id": title_id,
+            "season_number": season.season_number,
+            "name": season.name,
+            "episode_count": season.episode_count,
+            "air_date": season.air_date.isoformat() if season.air_date else None,
+            "updated_at": _now_iso(),
+        }
+        for season in item.seasons
+    ]
+    if not rows:
+        return
+    try:
+        supabase.table("title_seasons").upsert(rows, on_conflict="title_id,season_number").execute()
+    except Exception as exc:  # noqa: BLE001
+        if not _seasons_warning_printed:
+            _seasons_warning_printed = True
+            print(
+                "Note: could not save seasons, run supabase/migrations/019_title_seasons.sql "
+                f"in the Supabase SQL editor. Details: {exc}"
+            )
+
+
 def link_title_source(supabase: Client, title_id: str, source_id: str | None, source_url: str) -> None:
     if not source_id:
         return
@@ -395,6 +431,9 @@ def _upsert_item(
         # like before; this is the one state the crawler still refuses
         # to act on by itself.
         title_id = best_candidate.id if best_candidate else None
+
+    if write and title_id and item.seasons and crawl_state in ("new", "updated", "existing"):
+        save_seasons(supabase, title_id, item)
 
     if write and title_id and source_row:
         supabase.table("title_sources").upsert(
