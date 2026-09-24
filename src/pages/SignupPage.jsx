@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "../lib/supabaseClient.js";
 import { generateUniqueUsername } from "../lib/usernameGenerator.js";
+import { friendlyErrorMessage } from "../lib/connectionErrors.js";
 
 export function SignupPage() {
   const navigate = useNavigate();
@@ -106,7 +107,7 @@ export function SignupPage() {
     } catch (err) {
       setError(
         err instanceof Error
-          ? err.message
+          ? friendlyErrorMessage(err)
           : "Something went wrong. Please try again."
       );
     } finally {

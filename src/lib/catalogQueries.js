@@ -16,6 +16,8 @@
 // titles, that name only exists on announcements. toCardData() below
 // still exposes it to the rest of the app as `slug` so components
 // like MediaCard.jsx do not need to change.
+import { friendlyErrorMessage } from "./connectionErrors.js";
+
 const CARD_COLUMNS = "canonical_slug, type, canonical_title, release_year, country, poster_url, release_status";
 
 // A page this size keeps a single catalog request small even once the
@@ -40,7 +42,7 @@ function toCardData(row) {
 }
 
 function toErrorMessage(error) {
-  return error ? error.message : null;
+  return friendlyErrorMessage(error);
 }
 
 export async function getHomeSections(supabase) {

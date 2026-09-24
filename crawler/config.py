@@ -34,6 +34,12 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
 # regardless of how many actually exist.
 MAX_ANILIST_PAGES = int(os.environ.get("MAX_ANILIST_PAGES", "5"))
 
+# Minimum AniList tag rank (0 to 100) for the "Yuri" tag. AniList's own
+# default is 18, which lets in titles that only lightly touch the tag.
+# 30 keeps titles where yuri is a real part of the story. Lower it to
+# 18 to get everything AniList tags at all.
+ANILIST_MIN_TAG_RANK = int(os.environ.get("ANILIST_MIN_TAG_RANK", "30"))
+
 # Upper bound on how many GL Archive catalog pages fetch() will follow
 # in one run (see crawler/sources/gl_archive.py). Bounded the same way
 # as MAX_TMDB_PAGES, in case the site's real pagination turns out to be

@@ -7,6 +7,7 @@ import {
 
 import { supabase } from "../lib/supabaseClient.js";
 import { sanitizeNextPath } from "../lib/sanitizeNextPath.js";
+import { friendlyErrorMessage } from "../lib/connectionErrors.js";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -68,7 +69,7 @@ export function LoginPage() {
     } catch (err) {
       setError(
         err instanceof Error
-          ? err.message
+          ? friendlyErrorMessage(err)
           : "Login failed. Please try again."
       );
     } finally {
@@ -102,7 +103,7 @@ export function LoginPage() {
     );
 
     if (resetError) {
-      setError(resetError.message);
+      setError(friendlyErrorMessage(resetError));
       return;
     }
 

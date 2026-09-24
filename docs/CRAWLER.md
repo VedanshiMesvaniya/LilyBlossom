@@ -124,20 +124,65 @@ merged across two different existing title rows; that, and resolving
 the 0.80-0.95 "uncertain" band, is still what the admin review queue
 is for.
 
-## AniList
+## AniList (the main global source)
 
-`crawler/sources/anilist.py` is a source adapter, registered in
-`SOURCE_REGISTRY`. It queries AniList's public GraphQL API for anime
-tagged `Yuri` and can create new titles on its own, the same as GL
-Archive. It needs no API key. It pages through up to
-`MAX_ANILIST_PAGES` pages (`crawler/config.py`, default 5) using the
-`pageInfo.hasNextPage` field the query already requested, instead of
-only ever reading the first 50 results by popularity. AniList's API
-can be temporarily unavailable or rate limited; when that happens the
-crawler reports this source as `unavailable` for that run and
-continues with the other sources. The `Yuri` tag was checked against
-AniList's live site before this doc was written; it is a real tag,
-not a guess.
+`crawler/sources/anilist.py` is the main source. It queries AniList's
+public GraphQL API (free, no key) for anime tagged `Yuri`, and one
+query covers every region. Each result carries an ISO country code in
+`countryOfOrigin`, so Japanese anime, Chinese donghua, Korean titles
+and any other region arrive through the same path and are stored with
+the right country. The end of every crawl report prints a count per
+region for each source, for example `AniList by region: JP 180, CN 22,
+KR 9`.
+
+What the query asks for:
+
+- The `Yuri` tag above a minimum tag rank. `ANILIST_MIN_TAG_RANK`
+  (default 30, AniList's own default is 18) keeps titles where yuri is
+  a real part of the story and leaves out titles that barely touch
+  the tag.
+- Anime only, formats TV, TV_SHORT, MOVIE, OVA and ONA. `MOVIE` becomes
+  a Movie (with `runtime_minutes`), everything else becomes a Series
+  (with `episode_count`). Music videos and specials are left out.
+- No adult titles (`isAdult: false`), since the catalog is public.
+- Plain text descriptions (`asHtml: false`), so no HTML tags reach the
+  catalog.
+- Release date when AniList knows the year, month and day.
+
+It pages through up to `MAX_ANILIST_PAGES` pages of 50 (default 5, so
+up to 250 titles per run; raise it for a bigger first import) using
+`pageInfo.hasNextPage`, with a short pause between pages. AniList
+allows about 90 requests a minute. On a 429 the adapter waits for the
+`Retry-After` header and tries again. A GraphQL error, a body that is
+not JSON, or a network failure is reported as this source being
+`unavailable` for the run, and the other sources continue. The `Yuri`
+tag and the query arguments (`tag`, `minimumTagRank`, `isAdult`) were
+checked against AniList's published API reference.
+
+Live action GL from Thailand, Korea, Taiwan and other regions is not
+on AniList as anime. That part of the global catalog comes from TMDB
+(see below).
+
+## Countries and why crawls used to fail on every item
+
+`titles.country` is a foreign key to `countries(code)`, and no
+migration ever inserted a country row. Every write that carried a code
+such as `JP` or `KR` therefore failed, so a crawl found items but
+saved none of them, and the run ended as failed or partial with one
+error per item. Two fixes:
+
+- `supabase/migrations/018_seed_countries.sql` inserts every ISO
+  3166-1 alpha-2 code (plus `XK` for Kosovo). Run it once.
+- The crawler now reads the `countries` table at the start of a run
+  and blanks a code that is not in it (and lists it in the report),
+  so one odd code can no longer fail an item. If the table is empty the
+  report says so and points to migration 018.
+
+Two other crawl fixes in the same change: the crawler now reads the
+whole `titles` table for duplicate matching (Supabase returns at most
+1000 rows per request, so past 1000 titles known titles were inserted
+again), and any unexpected error inside one source now marks only that
+source as unavailable instead of stopping the run.
 
 ## MyAnimeList (via Jikan)
 
@@ -149,6 +194,19 @@ open source REST API that mirrors MyAnimeList's public pages. Checked
 before adding: it is real, currently working, needs no API key or
 signup, is MIT licensed, and publishes an explicit rate limit (60
 requests/minute, 3/second).
+
+**This source is disabled by default and needs a decision before
+turning it on.** After adding it, further checking (not done before
+the first pass, a real gap in that check) turned up this, stated
+plainly on Jikan's own GitHub repos and API listings: using the API
+"for the sake of populating data/making your own database" breaches
+MyAnimeList's Terms of Service. That is exactly what this crawler
+does. The API being real and working (which it is) is a different
+question from whether this specific use of it is allowed, and that
+second question is a policy call for a person to make, not something
+to decide by writing the adapter and leaving it on.
+`supabase/migrations/017_disable_myanimelist_pending_tos_decision.sql`
+disables it until that decision is made.
 
 MAL renamed its `Yuri` genre to `Girls Love` in 2022. Like the TMDB
 keyword fix above, this adapter does not hardcode that genre's
