@@ -84,6 +84,11 @@ architecture described above:
   `018_seed_countries.sql` must be run, because titles.country is a
   foreign key to the countries table; without it every crawl insert
   failed. See docs/CRAWLER.md.
+- The crawler now goes region by region (one AniList query per country,
+  one TMDB pass per region) so China, Korea, Thailand and other regions
+  get their own pages instead of Japan and the US using them all. The
+  page limits and region lists are settings in `.env`, see
+  `.env.example` and docs/CRAWLER.md.
 - TMDB titles now get full details (episode count, seasons, release
   date, status, runtime, language, country, IMDb id) through one extra
   call per title. Run migration `019_title_seasons.sql` for the season

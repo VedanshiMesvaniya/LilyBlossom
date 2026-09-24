@@ -32,7 +32,27 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
 # GraphQL query already asked for pageInfo.hasNextPage but never used
 # it, so only the first 50 results (by popularity) were ever fetched
 # regardless of how many actually exist.
-MAX_ANILIST_PAGES = int(os.environ.get("MAX_ANILIST_PAGES", "5"))
+def _csv_env(name: str, default: str) -> list[str]:
+    """Comma separated list from .env, uppercased. A blank value counts
+    as unset, because `NAME=` in .env gives an empty string."""
+    raw = os.environ.get(name, "").strip() or default
+    return [part.strip().upper() for part in raw.split(",") if part.strip()]
+
+
+# AniList is queried once per country of origin below, each with its own
+# page budget. One query for everything is sorted by popularity, so it
+# ran out of pages inside Japan and never reached China, Korea or Taiwan.
+ANILIST_COUNTRIES = _csv_env("ANILIST_COUNTRIES", "JP,CN,KR,TW,TH,US,GB,FR,DE,ES,IT,BR,MX,IN,PH,ID,VN")
+
+# TMDB is queried once with no region filter and then once per region
+# below (with_origin_country), for the same reason: popularity sorting
+# let the United States and Japan fill every page.
+TMDB_REGIONS = _csv_env(
+    "TMDB_REGIONS",
+    "TH,KR,JP,CN,TW,HK,PH,VN,ID,MY,SG,IN,US,GB,CA,AU,NZ,IE,MX,BR,AR,CO,CL,PE,ES,PT,FR,DE,IT,NL,BE,SE,NO,DK,FI,PL,CZ,AT,CH,GR,TR,RU,UA,IL,ZA,NG,EG",
+)
+
+MAX_ANILIST_PAGES = int(os.environ.get("MAX_ANILIST_PAGES", "20"))
 
 # Minimum AniList tag rank (0 to 100) for the "Yuri" tag. AniList's own
 # default is 18, which lets in titles that only lightly touch the tag.
@@ -49,7 +69,7 @@ MAX_GL_ARCHIVE_PAGES = int(os.environ.get("MAX_GL_ARCHIVE_PAGES", "20"))
 # Upper bound on how many /discover pages crawler/sources/tmdb.py will
 # request per type (TV, movie) per run, so a very large GL result set
 # cannot make a single crawl run unbounded.
-MAX_TMDB_PAGES = int(os.environ.get("MAX_TMDB_PAGES", "5"))
+MAX_TMDB_PAGES = int(os.environ.get("MAX_TMDB_PAGES", "10"))
 
 # Upper bound on how many /anime pages crawler/sources/jikan.py will
 # request per run. Jikan (api.jikan.moe) is a free, keyless, community
