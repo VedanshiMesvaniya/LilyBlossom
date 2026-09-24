@@ -29,11 +29,11 @@ only talk to each other through the database or a small, narrow API:
                           |
                  Daily scheduled job
                           |
-         -------------------------------
-         |                |                |
-      GL Archive        AniList          TMDB
-         |                |                |
-         -------------------------------
+         -----------------------------------------------
+         |                |                |            |
+      GL Archive        AniList      MyAnimeList       TMDB
+         |                |                |            |
+         -----------------------------------------------
                           |
                   normalize + dedupe
                           |

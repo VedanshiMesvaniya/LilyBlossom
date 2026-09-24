@@ -34,6 +34,12 @@ ENVIRONMENT = os.environ.get("ENVIRONMENT", "development")
 # regardless of how many actually exist.
 MAX_ANILIST_PAGES = int(os.environ.get("MAX_ANILIST_PAGES", "5"))
 
+# Minimum AniList tag rank (0 to 100) for the "Yuri" tag. AniList's own
+# default is 18, which lets in titles that only lightly touch the tag.
+# 30 keeps titles where yuri is a real part of the story. Lower it to
+# 18 to get everything AniList tags at all.
+ANILIST_MIN_TAG_RANK = int(os.environ.get("ANILIST_MIN_TAG_RANK", "30"))
+
 # Upper bound on how many GL Archive catalog pages fetch() will follow
 # in one run (see crawler/sources/gl_archive.py). Bounded the same way
 # as MAX_TMDB_PAGES, in case the site's real pagination turns out to be
@@ -44,6 +50,12 @@ MAX_GL_ARCHIVE_PAGES = int(os.environ.get("MAX_GL_ARCHIVE_PAGES", "20"))
 # request per type (TV, movie) per run, so a very large GL result set
 # cannot make a single crawl run unbounded.
 MAX_TMDB_PAGES = int(os.environ.get("MAX_TMDB_PAGES", "5"))
+
+# Upper bound on how many /anime pages crawler/sources/jikan.py will
+# request per run. Jikan (api.jikan.moe) is a free, keyless, community
+# run API; this exists for the same reason as the other MAX_*_PAGES
+# constants, not because Jikan itself paginates unusually deep.
+MAX_JIKAN_PAGES = int(os.environ.get("MAX_JIKAN_PAGES", "10"))
 
 CURRENT_YEAR = date.today().year
 
