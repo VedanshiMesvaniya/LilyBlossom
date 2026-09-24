@@ -45,6 +45,11 @@ during development instead of only being caught by RLS in production.
   to it, so this table must be filled before the crawler can save a
   title with a country. The crawler blanks a code that is not in the
   table instead of failing the write.
+- `title_seasons`: one row per season of a series (season number, name,
+  episode count, air date), filled by the crawler from TMDB and read by
+  the series detail page. Created by `019_title_seasons.sql`. The page
+  and the crawler both keep working if this table is missing, the
+  season list is just empty.
 - `user_media_status`: primary key is `(user_id, title_id)`, so a user
   can have exactly one status per title. A trigger automatically flips
   `status` to `watched` when `progress` reaches 100, but the user can

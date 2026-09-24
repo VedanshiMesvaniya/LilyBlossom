@@ -155,6 +155,18 @@ export async function getTitleBySlug(supabase, slug) {
   return { data: data ?? null, error: notFound ? null : toErrorMessage(error) };
 }
 
+// Seasons come from title_seasons (supabase/migrations/019_title_seasons.sql).
+// A missing table or any error just means "no season list to show", so
+// this never reports an error to the page; the title itself still loads.
+export async function getTitleSeasons(supabase, titleId) {
+  const { data, error } = await supabase
+    .from("title_seasons")
+    .select("season_number, name, episode_count, air_date")
+    .eq("title_id", titleId)
+    .order("season_number", { ascending: true });
+  return error ? [] : data ?? [];
+}
+
 export async function getAiring(supabase) {
   const { data, error } = await supabase
     .from("titles")

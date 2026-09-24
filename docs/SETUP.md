@@ -28,7 +28,7 @@ your own Supabase project, your own TMDB key, and your own secrets.
    but running them out of order will fail on missing tables. Do not
    skip `018_seed_countries.sql`: titles.country is a foreign key to
    the countries table, and without those rows the crawler cannot
-   save any title.
+   save any title. `019_title_seasons.sql` adds the season list table.
 4. Create three storage buckets: `title-posters`, `title-backdrops`,
    and `avatars`, plus `announcement-images`. Mark them public if you
    want images to load without a signed URL, and rely on the RLS
