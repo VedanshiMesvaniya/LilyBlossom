@@ -15,6 +15,7 @@ TRACKED_FIELDS = [
     "runtime_minutes",
     "description",
     "official_url",
+    "imdb_id",
 ]
 
 

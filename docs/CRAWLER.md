@@ -250,6 +250,21 @@ announcement is admin authored.
 
 `crawler/sources/tmdb.py` has two roles:
 
+- `TMDBAdapter` loads full details for every title it discovers.
+  `/discover` returns only a short summary (no episode count, seasons,
+  runtime, status, language, IMDb id, and no country for movies), so
+  before this every TMDB title was saved as "Announced" with blanks.
+  For each result the adapter now calls `/tv/{id}` (with
+  `external_ids`) or `/movie/{id}` and fills: `episode_count` and a
+  season list (series), `runtime_minutes` (movies), full
+  `release_date`, `release_status` (mapped from TMDB's status: Ended is
+  Completed, Returning Series is Airing, Canceled is Cancelled, a future
+  date is Upcoming), `language`, `country`, `imdb_id` and the official
+  site. A title TMDB has no page for is kept as is. If details keep
+  failing for some titles (rate limit, server error), the report says
+  how many, and those titles are saved with the fields discover gave.
+  Seasons go to `title_seasons` (migration 019). Per episode lists
+  (each episode's title and air date) are not stored yet.
 - `TMDBAdapter` is a source adapter, registered in `SOURCE_REGISTRY`.
   It discovers GL live-action titles through TMDB's `/discover/tv` and
   `/discover/movie` endpoints filtered to GL specific keywords, so it

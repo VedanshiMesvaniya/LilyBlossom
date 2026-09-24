@@ -4,6 +4,8 @@ Uses the official The Movie Database (TMDB) API to discover series and movies
 tagged with GL/lesbian romance/yuri keywords (product spec section 30 and 90).
 """
 import json
+import time
+from datetime import date
 from typing import Any, Optional
 
 import httpx
@@ -27,12 +29,133 @@ TMDB_BASE_URL = "https://api.themoviedb.org/3"
 GL_KEYWORD_NAMES = ["yuri", "lesbian"]
 
 
+def tmdb_release_status(item_type: str, detail: dict[str, Any], release_date: Optional[str], today: Optional[date] = None) -> str:
+    """Maps TMDB's own status text onto the catalog's release statuses.
+
+    /discover never returns a status, so before this every TMDB title
+    was stored as "Announced", which also left "Currently Airing"
+    empty. A release date in the future always means Upcoming, unless
+    TMDB says the title was canceled.
+    """
+    today = today or date.today()
+    tmdb_status = (detail.get("status") or "").strip()
+
+    if tmdb_status == "Canceled":
+        return "Cancelled"
+
+    if release_date:
+        try:
+            if date.fromisoformat(release_date) > today:
+                return "Upcoming"
+        except ValueError:
+            pass
+
+    if item_type == "Series":
+        if tmdb_status == "Returning Series":
+            return "Airing"
+        if tmdb_status == "Ended":
+            return "Completed"
+        if tmdb_status in ("In Production", "Pilot"):
+            return "In Production"
+        if tmdb_status == "Planned":
+            return "Announced"
+    else:
+        if tmdb_status == "Released":
+            return "Completed"
+        if tmdb_status in ("Post Production", "In Production"):
+            return "In Production"
+        if tmdb_status in ("Planned", "Rumored"):
+            return "Announced"
+
+    return "Announced"
+
+
+def _clean_date(value: Any) -> Optional[str]:
+    """TMDB sends an empty string for an unknown date. Keep only a real YYYY-MM-DD."""
+    if isinstance(value, str) and len(value) == 10:
+        try:
+            date.fromisoformat(value)
+            return value
+        except ValueError:
+            return None
+    return None
+
+
 class TMDBAdapter(SourceAdapter):
     name = "TMDB"
     base_url = TMDB_BASE_URL
 
     def __init__(self) -> None:
         self._keyword_ids_cache: Optional[str] = None
+        self.detail_failures = 0
+
+    def _fetch_detail(self, client: httpx.Client, item_type: str, tmdb_id: Any) -> tuple[Optional[dict[str, Any]], bool]:
+        """Loads /tv/{id} or /movie/{id}. Returns (detail, failed).
+
+        /discover only returns a short summary: no episode count, no
+        seasons, no runtime, no status, and no country for movies. The
+        detail call has all of them. A 404 just means TMDB has no page
+        (not a failure). Anything else that keeps failing is counted in
+        detail_failures and reported, and the title is still saved
+        with the discover fields it already has.
+        """
+        path = f"/tv/{tmdb_id}" if item_type == "Series" else f"/movie/{tmdb_id}"
+        headers, params = self._get_auth()
+        if item_type == "Series":
+            params["append_to_response"] = "external_ids"
+
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                response = client.get(
+                    f"{self.base_url}{path}", headers=headers, params=params, timeout=REQUEST_TIMEOUT_SECONDS
+                )
+            except httpx.TransportError:
+                time.sleep(attempt)
+                continue
+
+            if response.status_code == 404:
+                return None, False
+            if response.status_code == 429 or response.status_code >= 500:
+                try:
+                    wait = float(response.headers.get("Retry-After", attempt * 2))
+                except ValueError:
+                    wait = attempt * 2
+                time.sleep(min(wait, 10))
+                continue
+            if response.status_code >= 400:
+                return None, True
+            try:
+                return response.json(), False
+            except ValueError:
+                return None, True
+
+        return None, True
+
+    def _add_details(self, client: httpx.Client, payloads: list[str]) -> list[str]:
+        enriched: list[str] = []
+        for raw in payloads:
+            data = json.loads(raw)
+            item_type = data.get("_type", "Series")
+            for result in data.get("results", []):
+                if result.get("id") is None:
+                    continue
+                detail, failed = self._fetch_detail(client, item_type, result["id"])
+                if failed:
+                    self.detail_failures += 1
+                if detail:
+                    result["_detail"] = detail
+            enriched.append(json.dumps(data))
+        return enriched
+
+    def run(self, client: httpx.Client):  # type: ignore[override]
+        self.detail_failures = 0
+        items, errors = super().run(client)
+        if self.detail_failures:
+            errors.append(
+                f"TMDB: could not load full details for {self.detail_failures} title(s), "
+                "so some of their fields may be blank"
+            )
+        return items, errors
 
     def _get_auth(self) -> tuple[dict[str, str], dict[str, str]]:
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
@@ -116,7 +239,7 @@ class TMDBAdapter(SourceAdapter):
         payloads = []
         payloads.extend(self._fetch_all_pages(client, "/discover/tv", "Series", keyword_ids))
         payloads.extend(self._fetch_all_pages(client, "/discover/movie", "Movie", keyword_ids))
-        return payloads
+        return self._add_details(client, payloads)
 
     def parse(self, raw_payload: str) -> list[dict[str, Any]]:
         data = json.loads(raw_payload)
@@ -130,11 +253,41 @@ class TMDBAdapter(SourceAdapter):
             if not title:
                 continue
 
-            date_str = item.get("first_air_date") if item_type == "Series" else item.get("release_date")
-            year = int(date_str[:4]) if date_str and len(date_str) >= 4 and date_str[:4].isdigit() else None
+            detail = item.get("_detail") or {}
+            has_detail = bool(detail)
 
-            origin_countries = item.get("origin_country") or []
-            country = origin_countries[0] if origin_countries else None
+            if item_type == "Series":
+                date_str = _clean_date(detail.get("first_air_date")) or _clean_date(item.get("first_air_date"))
+                countries = detail.get("origin_country") or item.get("origin_country") or []
+                country = countries[0] if countries else None
+                episode_count = detail.get("number_of_episodes") or None
+                runtime = None
+                imdb_id = (detail.get("external_ids") or {}).get("imdb_id") or None
+                seasons = [
+                    {
+                        "season_number": season["season_number"],
+                        "name": season.get("name") or None,
+                        "episode_count": season.get("episode_count"),
+                        "air_date": _clean_date(season.get("air_date")),
+                    }
+                    for season in detail.get("seasons") or []
+                    if isinstance(season.get("season_number"), int) and season["season_number"] >= 1
+                ]
+            else:
+                date_str = _clean_date(detail.get("release_date")) or _clean_date(item.get("release_date"))
+                production = detail.get("production_countries") or []
+                countries = detail.get("origin_country") or item.get("origin_country") or []
+                country = (
+                    countries[0]
+                    if countries
+                    else (production[0].get("iso_3166_1") if production else None)
+                )
+                episode_count = None
+                runtime = detail.get("runtime") or None
+                imdb_id = detail.get("imdb_id") or None
+                seasons = []
+
+            year = int(date_str[:4]) if date_str else None
 
             poster_path = item.get("poster_path")
             poster_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None
@@ -143,17 +296,26 @@ class TMDBAdapter(SourceAdapter):
             path_type = "tv" if item_type == "Series" else "movie"
             source_url = f"https://www.themoviedb.org/{path_type}/{tmdb_id}"
 
+            homepage = detail.get("homepage")
             records.append(
                 {
                     "title": title,
                     "original_title": original_title,
                     "type": item_type,
                     "year": year,
+                    "release_date": date_str,
                     "country": country,
-                    "description": item.get("overview") or None,
+                    "language": detail.get("original_language") or item.get("original_language") or None,
+                    "status": tmdb_release_status(item_type, detail, date_str) if has_detail else None,
+                    "episode_count": episode_count,
+                    "runtime_minutes": runtime,
+                    "description": detail.get("overview") or item.get("overview") or None,
+                    "official_url": homepage if isinstance(homepage, str) and homepage.startswith("http") else None,
                     "poster_url": poster_url,
                     "source_url": source_url,
                     "tmdb_id": str(tmdb_id) if tmdb_id is not None else None,
+                    "imdb_id": imdb_id,
+                    "seasons": seasons,
                 }
             )
 
@@ -161,17 +323,28 @@ class TMDBAdapter(SourceAdapter):
 
     def normalize(self, record: dict[str, Any]) -> RawCrawlItem:
         year = int(record["year"]) if record.get("year") else None
+        fields: dict[str, Any] = {}
+        if record.get("status"):
+            fields["status"] = record["status"]
         return RawCrawlItem(
             title=record["title"],
             original_title=record.get("original_title"),
             type=record.get("type", "Series"),
             year=year,
+            release_date=record.get("release_date"),
             country=record.get("country"),
+            language=record.get("language"),
+            episode_count=record.get("episode_count"),
+            runtime_minutes=record.get("runtime_minutes"),
             description=record.get("description"),
+            official_url=record.get("official_url"),
             poster_url=record.get("poster_url"),
             source_url=record.get("source_url", "https://www.themoviedb.org"),
             source_name=self.name,
             tmdb_id=record.get("tmdb_id"),
+            imdb_id=record.get("imdb_id"),
+            seasons=record.get("seasons") or [],
+            **fields,
         )
 
 

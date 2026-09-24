@@ -4,7 +4,8 @@ import { NotFoundPage } from "./NotFoundPage.jsx";
 import { TrackingControls } from "../components/TrackingControls.jsx";
 import { supabase } from "../lib/supabaseClient.js";
 import { useAuth } from "../hooks/useAuth.jsx";
-import { getTitleBySlug } from "../lib/catalogQueries.js";
+import { getTitleBySlug, getTitleSeasons } from "../lib/catalogQueries.js";
+import { formatReleaseDate } from "../lib/formatDate.js";
 
 // Shared by /series/:slug and /movies/:slug, since the two pages were
 // identical except for one detail field (episode_count vs
@@ -16,12 +17,14 @@ export function TitleDetailPage({ type }) {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState(null);
+  const [seasons, setSeasons] = useState([]);
 
   useEffect(() => {
     let isMounted = true;
     setLoading(true);
     setNotFound(false);
     setError(null);
+    setSeasons([]);
 
     async function load() {
       const { data, error: queryError } = await getTitleBySlug(supabase, slug);
@@ -40,6 +43,11 @@ export function TitleDetailPage({ type }) {
       }
       setTitle(data);
       setLoading(false);
+
+      if (type === "series") {
+        const seasonRows = await getTitleSeasons(supabase, data.id);
+        if (isMounted) setSeasons(seasonRows);
+      }
     }
 
     load();
@@ -91,6 +99,9 @@ export function TitleDetailPage({ type }) {
             {[title.release_year, title.country, title.language].filter(Boolean).join(" · ")}
           </p>
           <p className="mt-1 text-sm text-primary">{title.release_status}</p>
+          {formatReleaseDate(title.release_date) && (
+            <p className="mt-1 text-sm text-text-muted">Release date: {formatReleaseDate(title.release_date)}</p>
+          )}
 
           {type === "series" && title.episode_count && (
             <p className="mt-3 text-sm text-text-muted">Episodes: {title.episode_count}</p>
@@ -100,6 +111,21 @@ export function TitleDetailPage({ type }) {
           )}
 
           {title.description && <p className="mt-4 text-sm text-text-primary">{title.description}</p>}
+
+          {type === "series" && seasons.length > 0 && (
+            <section className="mt-6">
+              <h2 className="font-display text-lg text-text-primary">Seasons</h2>
+              <ul className="mt-2 space-y-1 text-sm text-text-muted">
+                {seasons.map((season) => (
+                  <li key={season.season_number}>
+                    {season.name || `Season ${season.season_number}`}
+                    {season.episode_count != null && `, ${season.episode_count} episodes`}
+                    {formatReleaseDate(season.air_date) && `, aired ${formatReleaseDate(season.air_date)}`}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {user && (
             <div className="mt-6">

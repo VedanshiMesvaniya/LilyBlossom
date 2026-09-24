@@ -84,6 +84,10 @@ architecture described above:
   `018_seed_countries.sql` must be run, because titles.country is a
   foreign key to the countries table; without it every crawl insert
   failed. See docs/CRAWLER.md.
+- TMDB titles now get full details (episode count, seasons, release
+  date, status, runtime, language, country, IMDb id) through one extra
+  call per title. Run migration `019_title_seasons.sql` for the season
+  list, which the series page shows. See docs/CRAWLER.md.
 - The crawler has four sources: AniList, MyAnimeList, and TMDB use
   official, documented, free JSON APIs, not scraping, so there is no
   markup to keep in sync, and can each return a temporary error or get
