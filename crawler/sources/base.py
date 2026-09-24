@@ -54,7 +54,10 @@ class SourceAdapter(ABC):
 
         try:
             payloads = self.fetch(client)
-        except httpx.HTTPError as exc:
+        except Exception as exc:  # noqa: BLE001 - any failure here means this one source is unavailable
+            # Not only httpx.HTTPError: a bad JSON body, a GraphQL error
+            # or a missing key must also stop just this source, never
+            # the whole crawl.
             return [], [f"{self.name}: fetch failed: {exc}"]
 
         for payload in payloads:
