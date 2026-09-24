@@ -3,9 +3,15 @@ rate limit and error case (crawler/sources/anilist.py)."""
 import json
 
 import httpx
+import pytest
 
 from crawler.sources import anilist as anilist_module
 from crawler.sources.anilist import AniListAdapter
+
+
+@pytest.fixture(autouse=True)
+def single_unfiltered_pass(monkeypatch):
+    monkeypatch.setattr(anilist_module, "ANILIST_COUNTRIES", [])
 
 
 def media(media_id, fmt, country, **extra):

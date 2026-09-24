@@ -8,7 +8,7 @@ use httpx.MockTransport so they run without any real network access.
 """
 import httpx
 
-from crawler.sources.tmdb import TMDBAdapter
+from crawler.sources.tmdb import GL_EXTRA_KEYWORD_NAMES, GL_KEYWORD_NAMES, TMDBAdapter
 
 
 def make_transport(keyword_results, discover_results, seen_requests=None):
@@ -69,7 +69,9 @@ def test_resolve_keyword_ids_is_cached_after_the_first_call():
         adapter._resolve_keyword_ids(client)
 
     keyword_lookups = [r for r in seen_requests if r.url.path == "/3/search/keyword"]
-    assert len(keyword_lookups) == 2  # one per name, not four, so the cache held on the second call
+    # One lookup per name (main names plus extras), not double that, so the
+    # cache held on the second call.
+    assert len(keyword_lookups) == len(GL_KEYWORD_NAMES) + len(GL_EXTRA_KEYWORD_NAMES)
 
 
 def test_fetch_passes_the_resolved_ids_to_discover_endpoints(monkeypatch):

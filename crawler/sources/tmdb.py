@@ -10,7 +10,15 @@ from typing import Any, Optional
 
 import httpx
 
-from ..config import CURRENT_YEAR, MAX_RETRIES, MAX_TMDB_PAGES, REQUEST_TIMEOUT_SECONDS, TMDB_API_KEY, USER_AGENT
+from ..config import (
+    CURRENT_YEAR,
+    MAX_RETRIES,
+    MAX_TMDB_PAGES,
+    REQUEST_TIMEOUT_SECONDS,
+    TMDB_API_KEY,
+    TMDB_REGIONS,
+    USER_AGENT,
+)
 from ..models import RawCrawlItem
 from .base import SourceAdapter
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -27,6 +35,20 @@ TMDB_BASE_URL = "https://api.themoviedb.org/3"
 # current id up by name through TMDB's own /search/keyword endpoint
 # every time the adapter runs, and keeps it only for that one run.
 GL_KEYWORD_NAMES = ["yuri", "lesbian"]
+
+# More GL related keyword names. Unlike the two above, these are used
+# only when TMDB has a keyword with exactly that name. A name with no
+# exact match is skipped, never replaced by a loose search result, so a
+# name TMDB does not have can never pull in unrelated titles.
+GL_EXTRA_KEYWORD_NAMES = [
+    "lesbian relationship",
+    "lesbian couple",
+    "lesbian love",
+    "girls love",
+    "sapphic",
+    "wlw",
+    "female homosexuality",
+]
 
 
 def tmdb_release_status(item_type: str, detail: dict[str, Any], release_date: Optional[str], today: Optional[date] = None) -> str:
@@ -88,6 +110,7 @@ class TMDBAdapter(SourceAdapter):
     def __init__(self) -> None:
         self._keyword_ids_cache: Optional[str] = None
         self.detail_failures = 0
+        self.pass_failures: list[str] = []
 
     def _fetch_detail(self, client: httpx.Client, item_type: str, tmdb_id: Any) -> tuple[Optional[dict[str, Any]], bool]:
         """Loads /tv/{id} or /movie/{id}. Returns (detail, failed).
@@ -133,23 +156,36 @@ class TMDBAdapter(SourceAdapter):
 
     def _add_details(self, client: httpx.Client, payloads: list[str]) -> list[str]:
         enriched: list[str] = []
+        seen: set[tuple[str, Any]] = set()
         for raw in payloads:
             data = json.loads(raw)
             item_type = data.get("_type", "Series")
+            unique: list[dict[str, Any]] = []
             for result in data.get("results", []):
-                if result.get("id") is None:
+                tmdb_id = result.get("id")
+                if tmdb_id is None:
+                    unique.append(result)
                     continue
-                detail, failed = self._fetch_detail(client, item_type, result["id"])
+                # The same title turns up in the all regions pass and in
+                # its own region pass. Load and save it once.
+                if (item_type, tmdb_id) in seen:
+                    continue
+                seen.add((item_type, tmdb_id))
+                detail, failed = self._fetch_detail(client, item_type, tmdb_id)
                 if failed:
                     self.detail_failures += 1
                 if detail:
                     result["_detail"] = detail
+                unique.append(result)
+            data["results"] = unique
             enriched.append(json.dumps(data))
         return enriched
 
     def run(self, client: httpx.Client):  # type: ignore[override]
         self.detail_failures = 0
         items, errors = super().run(client)
+        if self.pass_failures and not any("fetch failed" in e for e in errors):
+            errors.append(f"TMDB: could not fetch these lists: {', '.join(self.pass_failures)}")
         if self.detail_failures:
             errors.append(
                 f"TMDB: could not load full details for {self.detail_failures} title(s), "
@@ -199,10 +235,21 @@ class TMDBAdapter(SourceAdapter):
             if match and match.get("id") is not None:
                 found_ids.append(str(match["id"]))
 
+        for keyword_name in GL_EXTRA_KEYWORD_NAMES:
+            try:
+                data = self._fetch_endpoint(client, "/search/keyword", {"query": keyword_name})
+            except Exception:  # noqa: BLE001 - an optional extra keyword must never stop the crawl
+                continue
+            exact = next((r for r in data.get("results", []) if r.get("name", "").lower() == keyword_name), None)
+            if exact and exact.get("id") is not None and str(exact["id"]) not in found_ids:
+                found_ids.append(str(exact["id"]))
+
         self._keyword_ids_cache = "|".join(found_ids)
         return self._keyword_ids_cache
 
-    def _fetch_all_pages(self, client: httpx.Client, endpoint: str, item_type: str, keyword_ids: str) -> list[str]:
+    def _fetch_all_pages(
+        self, client: httpx.Client, endpoint: str, item_type: str, keyword_ids: str, region: Optional[str] = None
+    ) -> list[str]:
         """Pages through one /discover endpoint up to MAX_TMDB_PAGES,
         stopping early once TMDB reports there are no more pages left.
         Without this, only the first ~20 results were ever collected
@@ -212,11 +259,10 @@ class TMDBAdapter(SourceAdapter):
         total_pages = 1
 
         while page <= min(total_pages, MAX_TMDB_PAGES):
-            data = self._fetch_endpoint(
-                client,
-                endpoint,
-                {"with_keywords": keyword_ids, "sort_by": "popularity.desc", "page": page},
-            )
+            params: dict[str, Any] = {"with_keywords": keyword_ids, "sort_by": "popularity.desc", "page": page}
+            if region:
+                params["with_origin_country"] = region
+            data = self._fetch_endpoint(client, endpoint, params)
             data["_type"] = item_type
             payloads.append(json.dumps(data))
 
@@ -236,9 +282,23 @@ class TMDBAdapter(SourceAdapter):
             # about, so there is nothing safe to discover against.
             return []
 
-        payloads = []
-        payloads.extend(self._fetch_all_pages(client, "/discover/tv", "Series", keyword_ids))
-        payloads.extend(self._fetch_all_pages(client, "/discover/movie", "Movie", keyword_ids))
+        # One pass with no region filter, then one per region. Sorting by
+        # popularity alone let a few big regions fill every page, so
+        # Thai, Korean, Filipino and other regional GL barely showed up.
+        # A pass that fails is noted and the others still run.
+        payloads: list[str] = []
+        self.pass_failures = []
+        last_error: Optional[Exception] = None
+        for region in [None, *TMDB_REGIONS]:
+            for endpoint, item_type in (("/discover/tv", "Series"), ("/discover/movie", "Movie")):
+                try:
+                    payloads.extend(self._fetch_all_pages(client, endpoint, item_type, keyword_ids, region))
+                except Exception as exc:  # noqa: BLE001
+                    last_error = exc
+                    self.pass_failures.append(f"{region or 'all regions'} {item_type}")
+
+        if not payloads and last_error is not None:
+            raise last_error
         return self._add_details(client, payloads)
 
     def parse(self, raw_payload: str) -> list[dict[str, Any]]:
@@ -257,10 +317,31 @@ class TMDBAdapter(SourceAdapter):
             has_detail = bool(detail)
 
             if item_type == "Series":
-                date_str = _clean_date(detail.get("first_air_date")) or _clean_date(item.get("first_air_date"))
+                real_seasons = [
+                    season
+                    for season in detail.get("seasons") or []
+                    if isinstance(season.get("season_number"), int) and season["season_number"] >= 1
+                ]
+                # first_air_date is empty for a show that has not aired yet. Fall
+                # back to the next episode's date, then the earliest season date.
+                date_str = (
+                    _clean_date(detail.get("first_air_date"))
+                    or _clean_date(item.get("first_air_date"))
+                    or _clean_date((detail.get("next_episode_to_air") or {}).get("air_date"))
+                    or min(
+                        (d for d in (_clean_date(season.get("air_date")) for season in real_seasons) if d),
+                        default=None,
+                    )
+                )
                 countries = detail.get("origin_country") or item.get("origin_country") or []
                 country = countries[0] if countries else None
-                episode_count = detail.get("number_of_episodes") or None
+                # number_of_episodes is 0 for an unaired show. Fall back to the
+                # sum of the season episode counts.
+                episode_count = (
+                    detail.get("number_of_episodes")
+                    or sum(season.get("episode_count") or 0 for season in real_seasons)
+                    or None
+                )
                 runtime = None
                 imdb_id = (detail.get("external_ids") or {}).get("imdb_id") or None
                 seasons = [
@@ -270,8 +351,7 @@ class TMDBAdapter(SourceAdapter):
                         "episode_count": season.get("episode_count"),
                         "air_date": _clean_date(season.get("air_date")),
                     }
-                    for season in detail.get("seasons") or []
-                    if isinstance(season.get("season_number"), int) and season["season_number"] >= 1
+                    for season in real_seasons
                 ]
             else:
                 date_str = _clean_date(detail.get("release_date")) or _clean_date(item.get("release_date"))

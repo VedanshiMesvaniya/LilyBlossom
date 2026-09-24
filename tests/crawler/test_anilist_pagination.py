@@ -6,7 +6,17 @@ import json
 
 import httpx
 
+import pytest
+
+from crawler.sources import anilist as anilist_module
 from crawler.sources.anilist import AniListAdapter
+
+
+@pytest.fixture(autouse=True)
+def single_unfiltered_pass(monkeypatch):
+    """These tests are about one pass. The per country passes have their
+    own tests in test_crawl_coverage.py."""
+    monkeypatch.setattr(anilist_module, "ANILIST_COUNTRIES", [])
 
 
 def make_page(has_next: bool, media_id: int) -> dict:
