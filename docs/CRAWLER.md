@@ -22,10 +22,32 @@ existing titles ->
    that found it -> admin publishes (or corrects) when ready
 ```
 
-A crawler-created title is always written with `is_published = false`.
-Nothing it finds is public until an admin publishes it, see
-`docs/ADMIN.md`. The only case still fully gated behind admin review
-before it touches `titles` at all is a genuinely unclear match.
+A crawler-created title is written unpublished (`is_published = false`)
+by default, so a small run still waits for an admin to publish it, see
+`docs/ADMIN.md`. Two settings in `crawler/config.py` change this:
+
+- `AUTO_PUBLISH_NEW_TITLES=true` publishes every new title the crawler
+  finds right away, no review queue.
+- `AUTO_PUBLISH_ITEM_THRESHOLD` (default `1000`) does the same
+  automatically for any single run that finds this many items or more.
+  Nobody can review a queue of a thousand-plus items one at a time, so
+  a run this size is treated as trusted bulk data and goes live
+  directly, in the correct category from the start (see the status fix
+  below).
+
+The only case still fully gated behind admin review before it touches
+`titles` at all is a genuinely unclear match.
+
+Every item's release status also passes through
+`resolve_release_status()` in `crawler/main.py` before it is written.
+A source adapter that cannot map its own status text falls back to
+`"Announced"`, and the site treats `"Announced"` as an upcoming title
+(see `getUpcoming()` in `src/lib/catalogQueries.js`). Without this fix
+a title whose release date had already passed, but whose source status
+was unrecognized, stayed on the Upcoming page forever. Now, any title
+still on the default `"Announced"` status whose release date is today
+or earlier is reclassified to `"Airing"` (series) or `"Completed"`
+(movie), so it lands on the right page instead of Upcoming.
 
 Once the `sources` table has rows, it is the only authority: a
 disabled source never runs, and if every source is disabled the crawl

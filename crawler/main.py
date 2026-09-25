@@ -40,7 +40,12 @@ import httpx
 from supabase import create_client, Client
 
 from .change_detector import detect_changes
-from .config import SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL
+from .config import (
+    AUTO_PUBLISH_ITEM_THRESHOLD,
+    AUTO_PUBLISH_NEW_TITLES,
+    SUPABASE_SERVICE_ROLE_KEY,
+    SUPABASE_URL,
+)
 from .deduplicator import CandidateTitle, classify_match, find_best_match
 from .models import CrawlRunSummary, RawCrawlItem
 from .normalizer import normalize_title, slugify
@@ -181,6 +186,31 @@ def load_enabled_sources(supabase: Client | None) -> list[tuple[SourceAdapter, d
             continue
         pairs.append((cls(), row))
     return pairs
+
+
+def resolve_release_status(item: RawCrawlItem, today: datetime | None = None) -> RawCrawlItem:
+    """Fixes a title stuck on the source's default "Announced" status.
+
+    Every source adapter falls back to "Announced" whenever it cannot
+    map its own status text (see the STATUS_MAP fallbacks in
+    crawler/sources/*.py). getUpcoming() in catalogQueries.js treats
+    "Announced" as an upcoming title, so a title whose release date has
+    already passed, but whose source status was unrecognized, stayed on
+    the Upcoming page forever instead of moving to Airing or Completed.
+
+    Only touches items still on the default "Announced" status with a
+    known release date; a status a source adapter actually resolved
+    (Airing, Completed, Cancelled, ...) is left exactly as it is.
+    """
+    if item.status != "Announced" or not item.release_date:
+        return item
+
+    today_date = (today or datetime.now(timezone.utc)).date()
+    if item.release_date > today_date:
+        return item
+
+    new_status = "Airing" if item.type == "Series" else "Completed"
+    return item.model_copy(update={"status": new_status})
 
 
 def build_title_fields(item: RawCrawlItem) -> dict:
@@ -382,6 +412,7 @@ def _upsert_item(
     used_slugs: set[str],
     dry_run: bool,
     run_id: str | None,
+    auto_publish: bool = False,
 ) -> str:
     """Matches one item against known titles and, unless this is a dry
     run, actually writes the result: a new titles row, an update to an
@@ -398,7 +429,7 @@ def _upsert_item(
 
     if match_state == "new":
         if write:
-            title_id = insert_new_title(supabase, item, source_name, published=False)
+            title_id = insert_new_title(supabase, item, source_name, published=auto_publish)
             candidates.append(
                 CandidateTitle(
                     id=title_id,
@@ -541,8 +572,15 @@ def run_crawl(dry_run: bool, run_id: str | None = None, supabase: Client | None 
     unknown_country_codes: set[str] = set()
     used_slugs: set[str] = set()
 
+    # A run this large cannot realistically go through one-by-one admin
+    # review, so its new titles are published straight away. See
+    # AUTO_PUBLISH_ITEM_THRESHOLD and AUTO_PUBLISH_NEW_TITLES in
+    # crawler/config.py.
+    auto_publish = AUTO_PUBLISH_NEW_TITLES or len(all_items) >= AUTO_PUBLISH_ITEM_THRESHOLD
+
     for item, source_name, source_row in all_items:
         item = sanitize_item_country(item, known_countries, unknown_country_codes)
+        item = resolve_release_status(item)
         try:
             state = _upsert_item(
                 item=item,
@@ -553,6 +591,7 @@ def run_crawl(dry_run: bool, run_id: str | None = None, supabase: Client | None 
                 used_slugs=used_slugs,
                 dry_run=dry_run,
                 run_id=run_id,
+                auto_publish=auto_publish,
             )
         except Exception as exc:  # noqa: BLE001 - one bad item must not kill the run
             state = "error"
@@ -596,6 +635,7 @@ def run_crawl(dry_run: bool, run_id: str | None = None, supabase: Client | None 
     for name, status in source_statuses:
         print(f"  {name}: {status}")
     print(f"Items found: {summary.items_found}")
+    print(f"Auto publish new titles: {'yes' if auto_publish else 'no'}")
     for result in source_results:
         if result.get("regions"):
             breakdown = ", ".join(f"{code} {count}" for code, count in result["regions"].items())

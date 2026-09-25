@@ -35,12 +35,15 @@ Published titles (is_published = true) become visible to everyone
 ```
 
 Titles the crawler is confident about (a brand new title, or an
-update to one it already knows) are written to `titles` right away,
-but always with `is_published = false`, so review still happens
-before anything is public, it just happens as "check and publish"
-rather than "create from scratch." Only a genuinely unclear match
-still sits purely in `crawl_items` until a human resolves it. See
-`docs/CRAWLER.md` and `ARCHITECTURE.md`'s "Data flow for a new title".
+update to one it already knows) are written to `titles` right away.
+By default this is with `is_published = false`, so review still
+happens before anything is public, it just happens as "check and
+publish" rather than "create from scratch." A run that finds a very
+large batch of items, or has `AUTO_PUBLISH_NEW_TITLES=true` set,
+skips this and publishes new titles directly, see "Auto publish" in
+`docs/CRAWLER.md`. Only a genuinely unclear match still sits purely in
+`crawl_items` until a human resolves it. See `docs/CRAWLER.md` and
+`ARCHITECTURE.md`'s "Data flow for a new title".
 
 ## Pages
 
