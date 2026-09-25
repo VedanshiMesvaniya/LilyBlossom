@@ -84,6 +84,18 @@ MAX_RETRIES = 3
 RETRY_BACKOFF_SECONDS = 2
 REQUEST_DELAY_SECONDS = 1.5  # politeness delay between requests to one source
 
+# When true, every brand new title the crawler finds is published right
+# away instead of waiting in the admin review queue. Off by default so
+# a small test crawl still goes through review first.
+AUTO_PUBLISH_NEW_TITLES = os.environ.get("AUTO_PUBLISH_NEW_TITLES", "false").strip().lower() == "true"
+
+# Even with AUTO_PUBLISH_NEW_TITLES off, a crawl that finds this many
+# items or more in one run auto publishes its new titles anyway. A
+# human cannot realistically review a queue of a thousand-plus items
+# one by one, so a run this size is treated as trusted bulk data and
+# goes live directly.
+AUTO_PUBLISH_ITEM_THRESHOLD = int(os.environ.get("AUTO_PUBLISH_ITEM_THRESHOLD", "1000"))
+
 DUPLICATE_CONFIDENCE_THRESHOLD = 0.95   # >= this: treat as the same title
 REVIEW_CONFIDENCE_THRESHOLD = 0.80      # 0.80-0.95: needs admin review
 # below REVIEW_CONFIDENCE_THRESHOLD: treated as a different title
